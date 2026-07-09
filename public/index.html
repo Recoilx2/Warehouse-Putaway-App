@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yeti AI Put-Away Station</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        #app-container { max-width: 900px; width: 100%; text-align: center; }
+        .window-box { background: #222; border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); text-align: left; }
+        .grid-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; }
+        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 14px; font-weight: bold; background: #ee5253; margin-top: 10px; }
+        .connected { background: #10ac84; }
+        .loading { background: #f1c40f; color: #000; }
+        .btn { background: #54a0ff; color: white; border: none; padding: 12px 24px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        .btn:hover { background: #2e86de; }
+        .btn-success { background: #10ac84; }
+        .btn-success:hover { background: #0f9673; }
+        #match-output { font-size: 24px; font-weight: bold; margin-top: 10px; padding: 15px; border-radius: 6px; display: none; }
+        .match-success { background: rgba(16, 172, 132, 0.2); border: 2px solid #10ac84; color: #10ac84; }
+        .match-fail { background: rgba(238, 82, 83, 0.2); border: 2px solid #ee5253; color: #ff6b6b; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #1a1a1a; }
+        th, td { padding: 10px; border: 1px solid #333; text-align: left; }
+        th { background: #2d2d2d; color: #54a0ff; }
+        .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; }
+        .config-group { display: flex; flex-direction: column; }
+        .config-group label { font-size: 13px; color: #aaa; margin-bottom: 5px; }
+        select { background: #333; color: white; border: 1px solid #444; padding: 8px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+        input[type="file"] { background: #333; padding: 10px; border-radius: 6px; border: 1px solid #444; color: #fff; cursor: pointer; width: 100%; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <h2>Yeti AI Web Scanner Put-Away</h2>
+    
+    <div class="window-box">
+        <h3>1. Smart Inventory Initialization</h3>
+        <div style="display:grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: end;">
+            <div>
+                <label style="display:block; margin-bottom: 5px; color:#aaa;">Select Master Lookup File (.csv, .xls, .xlsx):</label>
+                <input type="file" id="excel-file-picker" accept=".xlsx, .xls, .csv" onchange="handleFileLoad(this)">
+            </div>
+            <div class="config-group" id="sheet-wrapper" style="display:none;">
+                <label>Select Target Sheet/Tab:</label>
+                <select id="sheet-selector" onchange="parseSelectedSheet()"></select>
+            </div>
+        </div>
+
+        <div class="config-grid" id="mapping-panel" style="display:none; border-top: 1px solid #333; padding-top: 15px;">
+            <div class="config-group">
+                <label>Product Name / Description Column:</label>
+                <select id="col-product-selector" onchange="buildInventoryCache()"></select>
+            </div>
+            <div class="config-group">
+                <label>Bin Location / Comments Column:</label>
+                <select id="col-bin-selector" onchange="buildInventoryCache()"></select>
+            </div>
+        </div>
+        <div id="db-status" style="font-weight: bold; color: #ff6b6b; margin-top: 15px;">Status: File Not Loaded</div>
+    </div>
+
+    <div class="grid-layout">
+        <div class="window-box">
+            <h3>2. Live Video Capture</h3>
+            <video id="preview" autoplay playsinline></video>
+            <div id="camera-status" class="status-badge">Camera Disconnected</div>
+            <p style="color:#888; font-size:13px; margin-top:10px;">Tap <strong>Spacebar</strong> to scan.</p>
+        </div>
+
+        <div class="window-box">
+            <h3>3. Decision Match Matrix</h3>
+            <div id="match-output">Waiting for frame trigger...</div>
+            <div id="match-details" style="margin-top: 15px; font-size: 14px; color: #aaa;"></div>
+        </div>
+    </div>
+
+    <div class="window-box">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>4. Current Processing Batch Run</h3>
+            <button class="btn btn-success" onclick="exportBatchToExcel()">Export Print Sheet (.xlsx)</button>
+        </div>
+        <table id="batch-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Scanned Text</th>
+                    <th>Matched Product Name</th>
+                    <th>Bin Location</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    console.log("🚀 Script section loading...");
+
+    const videoEl = document.getElementById('preview');
+    const cameraStatusEl = document.getElementById('camera-status');
+    const dbStatusEl = document.getElementById('db-status');
+    const matchOutputEl = document.getElementById('match-output');
+    const matchDetailsEl = document.getElementById('match-details');
+    const batchTableBody = document.querySelector('#batch-table tbody');
+    
+    const sheetWrapper = document.getElementById('sheet-wrapper');
+    const sheetSelector = document.getElementById('sheet-selector');
+    const mappingPanel = document.getElementById('mapping-panel');
+    const colProductSelector = document.getElementById('col-product-selector');
+    const colBinSelector = document.getElementById('col-bin-selector');
+
+    let currentWorkbook = null;
+    let rawSheetMatrix = []; 
+    let masterInventoryCache = [];
+    let scannedBatchRows = [];
+    let isProcessing = false;
+
+    // Initialize Camera Stream
+    async function initializeCamera() {
+        console.log("🎬 Requesting camera devices...");
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" }
+            });
+            videoEl.srcObject = stream;
+            cameraStatusEl.textContent = "Camera Live (HD Ready)";
+            cameraStatusEl.className = "status-badge connected";
+            console.log("✅ Camera feed successfully attached.");
+        } catch (err) {
+            console.error("❌ Camera failed:", err);
+            cameraStatusEl.textContent = "Error: Camera Blocked";
+        }
+    }
+
+    // Load file stream into SheetJS
+    function handleFileLoad(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        dbStatusEl.textContent = "Reading file payload...";
+        dbStatusEl.style.color = "#f1c40f";
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            currentWorkbook = XLSX.read(data, { type: 'array' });
+            
+            sheetSelector.innerHTML = "";
+            currentWorkbook.SheetNames.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                sheetSelector.appendChild(opt);
+            });
+
+            if (currentWorkbook.SheetNames.includes("Custom Item and Location List")) {
+                sheetSelector.value = "Custom Item and Location List";
+            }
+
+            if (currentWorkbook.SheetNames.length <= 1) {
+                sheetWrapper.style.display = "none";
+            } else {
+                sheetWrapper.style.display = "flex";
+            }
+
+            parseSelectedSheet();
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // Open selected tab and extract headers
+    function parseSelectedSheet() {
+        if (!currentWorkbook) return;
+        const targetSheetName = sheetSelector.value;
+        const sheet = currentWorkbook.Sheets[targetSheetName];
+        
+        rawSheetMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        if (rawSheetMatrix.length === 0) return;
+
+        let headerRowIdx = 0;
+        while (headerRowIdx < rawSheetMatrix.length && (!rawSheetMatrix[headerRowIdx] || rawSheetMatrix[headerRowIdx].length === 0)) {
+            headerRowIdx++;
+        }
+
+        const headers = rawSheetMatrix[headerRowIdx] || [];
+        colProductSelector.innerHTML = "";
+        colBinSelector.innerHTML = "";
+
+        headers.forEach((headerText, colIndex) => {
+            const cleanText = headerText ? String(headerText).trim() : `Column ${colIndex + 1}`;
+            
+            const optP = document.createElement('option');
+            optP.value = colIndex;
+            optP.textContent = cleanText;
+            colProductSelector.appendChild(optP);
+
+            const optB = document.createElement('option');
+            optB.value = colIndex;
+            optB.textContent = cleanText;
+            colBinSelector.appendChild(optB);
+        });
+
+        headers.forEach((headerText, colIndex) => {
+            const txt = String(headerText).toUpperCase();
+            if (txt.includes("DESCRIPTION") || txt.includes("MATERIAL")) colProductSelector.value = colIndex;
+            if (txt.includes("BIN") || txt.includes("COMMENT") || txt.includes("LOCATION")) colBinSelector.value = colIndex;
+        });
+
+        mappingPanel.style.display = "grid";
+        buildInventoryCache();
+    }
+
+    // Build functional cache
+    function buildInventoryCache() {
+        if (rawSheetMatrix.length <= 1) return;
+
+        const productIdx = parseInt(colProductSelector.value);
+        const binIdx = parseInt(colBinSelector.value);
+
+        masterInventoryCache = rawSheetMatrix.slice(1)
+            .filter(row => row[productIdx] !== undefined && row[binIdx] !== undefined)
+            .map(row => ({
+                description: String(row[productIdx]).trim(),
+                location: String(row[binIdx]).trim()
+            }))
+            .filter(item => item.description !== "");
+
+        dbStatusEl.textContent = `Ready: Connected to ${masterInventoryCache.length} Active Rows mapped dynamically.`;
+        dbStatusEl.style.color = "#10ac84";
+    }
+
+    // Fuzzy Matcher Engine
+    function calculateFuzzyMatch(scannedStr, masterStr) {
+        const cleanTokens = (str) => str.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
+        const scannedTokens = cleanTokens(scannedStr);
+        const masterTokens = cleanTokens(masterStr);
+
+        if (scannedTokens.length === 0 || masterTokens.length === 0) return 0;
+
+        let intersectionCount = 0;
+        scannedTokens.forEach(token => {
+            if (masterTokens.some(mToken => mToken.includes(token) || token.includes(mToken))) {
+                intersectionCount++;
+            }
+        });
+
+        return (intersectionCount / Math.max(scannedTokens.length, masterTokens.length)) * 100;
+    }
+
+    // Capture Frame and Call API
+    async function executeScanWorkflow() {
+        if (isProcessing) return;
+        if (masterInventoryCache.length === 0) {
+            alert("Please load an inventory data sheet file first.");
+            return;
+        }
+
+        isProcessing = true;
+        matchOutputEl.style.display = "block";
+        matchOutputEl.className = "loading";
+        matchOutputEl.textContent = "AI Reading Label...";
+
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = videoEl.videoWidth || 1280;
+            canvas.height = videoEl.videoHeight || 720;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            const base64Image = dataUrl.split(',')[1];
+
+            const response = await fetch('/api/extract', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_base64: base64Image })
+            });
+
+            const data = await response.json();
+            if (!response.ok || !data.text) throw new Error(data.error || "OCR failed");
+
+            const aiText = data.text;
+            let bestMatch = null;
+            let highestScore = -1;
+
+            masterInventoryCache.forEach(item => {
+                const score = calculateFuzzyMatch(aiText, item.description);
+                if (score > highestScore) {
+                    highestScore = score;
+                    bestMatch = item;
+                }
+            });
+
+            if (bestMatch && highestScore >= 50) {
+                matchOutputEl.className = "match-success";
+                matchOutputEl.innerHTML = `Bin: ${bestMatch.location}`;
+                matchDetailsEl.innerHTML = `<strong>AI Read:</strong> "${aiText}"<br><strong>Matched Row:</strong> ${bestMatch.description} (${highestScore.toFixed(0)}% Confidence)`;
+
+                const newRow = {
+                    timestamp: new Date().toLocaleTimeString(),
+                    scannedText: aiText,
+                    matchedProduct: bestMatch.description,
+                    binLocation: bestMatch.location
+                };
+                scannedBatchRows.push(newRow);
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${newRow.timestamp}</td><td>${newRow.scannedText}</td><td>${newRow.matchedProduct}</td><td style="font-weight:bold; color:#54a0ff;">${newRow.binLocation}</td>`;
+                batchTableBody.insertBefore(tr, batchTableBody.firstChild);
+
+            } else {
+                matchOutputEl.className = "match-fail";
+                matchOutputEl.textContent = "No Valid Match Found";
+                matchDetailsEl.innerHTML = `<strong>AI Read:</strong> "${aiText}" but similarity fell below constraints.`;
+            }
+
+        } catch (err) {
+            matchOutputEl.className = "match-fail";
+            matchOutputEl.textContent = "Extraction Error";
+            matchDetailsEl.textContent = err.message;
+        } finally {
+            isProcessing = false;
+        }
+    }
+
+    // Export Batch Out
+    function exportBatchToExcel() {
+        if (scannedBatchRows.length === 0) {
+            alert("No collected warehouse records present to batch export.");
+            return;
+        }
+
+        const formattedData = scannedBatchRows.map(row => ({
+            "Timestamp": row.timestamp,
+            "Raw Scanned Label": row.scannedText,
+            "Matched Inventory Item": row.matchedProduct,
+            "Assigned Bin Location": row.binLocation
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(formattedData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Putaway Labels");
+        XLSX.writeFile(workbook, "ready_to_print.xlsx");
+    }
+
+    // Key Listener
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            executeScanWorkflow();
+        }
+    });
+
+    // Run initialization
+    initializeCamera();
+</script>
+</body>
+</html>
