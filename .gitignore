@@ -1,0 +1,12 @@
+# Python environment
+venv/
+__pycache__/
+*.pyc
+
+# Configuration and Secrets
+config.ini
+
+# Local Excel Sheets (keeps heavy warehouse data out of git)
+*.xlsx
+*.xlsm
+*.xls
