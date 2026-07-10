@@ -3,90 +3,185 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yeti AI Put-Away Station</title>
+    <title>AI Warehouse Put-Away Station</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#111111">
+    
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+    
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        #app-container { max-width: 900px; width: 100%; text-align: center; }
+        #app-container { max-width: 950px; width: 100%; text-align: center; position: relative; }
         .window-box { background: #222; border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); text-align: left; }
-        .grid-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .grid-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
         video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; }
-        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 14px; font-weight: bold; background: #ee5253; margin-top: 10px; }
-        .connected { background: #10ac84; }
-        .loading { background: #f1c40f; color: #000; }
-        .btn { background: #54a0ff; color: white; border: none; padding: 12px 24px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        
+        /* Network Connectivity Status UI Badge */
+        .connection-badge { position: fixed; top: 15px; right: 15px; padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); z-index: 1000; transition: 0.3s ease; }
+        .status-online { background: #10ac84; color: white; border: 1px solid #1dd1a1; }
+        .status-offline { background: #ee5253; color: white; border: 1px solid #ff6b6b; animation: pulse-glow 2s infinite; }
+        
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(238, 82, 83, 0.7); }
+            70% { box-shadow: 0 0 0 8px rgba(238, 82, 83, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(238, 82, 83, 0); }
+        }
+
+        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 14px; font-weight: bold; background: #333; margin-top: 10px; text-transform: uppercase; }
+        .state-idle { background: #2e86de; color: white; }
+        .state-loading { background: #f1c40f; color: #000; }
+        .state-review { background: #10ac84; color: white; }
+        .state-print { background: #9b59b6; color: white; }
+
+        .btn { background: #54a0ff; color: white; border: none; padding: 12px 24px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; margin-right: 5px; }
         .btn:hover { background: #2e86de; }
         .btn-success { background: #10ac84; }
         .btn-success:hover { background: #0f9673; }
-        #match-output { font-size: 24px; font-weight: bold; margin-top: 10px; padding: 15px; border-radius: 6px; display: none; }
-        .match-success { background: rgba(16, 172, 132, 0.2); border: 2px solid #10ac84; color: #10ac84; }
-        .match-fail { background: rgba(238, 82, 83, 0.2); border: 2px solid #ee5253; color: #ff6b6b; }
+        .btn-secondary { background: #576574; }
+        .btn-secondary:hover { background: #485460; }
+        .btn-danger { background: #ee5253; }
+        .btn-danger:hover { background: #cf6a17; }
+        
+        #review-panel { display: none; margin-top: 10px; padding: 15px; border-radius: 8px; background: #2d2d2d; border: 2px solid #444; }
+        #print-prompt-panel { display: none; margin-top: 10px; padding: 20px; border-radius: 8px; background: rgba(155, 89, 182, 0.15); border: 2px dashed #9b59b6; text-align: center; }
+        .gatekeeper-warning { border-color: #ee5253 !important; background: rgba(238, 82, 83, 0.1) !important; }
+        
+        select, input[type="text"] { background: #333; color: white; border: 1px solid #555; padding: 12px; border-radius: 6px; font-size: 15px; width: 100%; box-sizing: border-box; margin-top: 5px; word-break: break-all; }
+        select:focus, input[type="text"]:focus { border-color: #54a0ff; outline: none; }
+        
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #1a1a1a; }
         th, td { padding: 10px; border: 1px solid #333; text-align: left; }
         th { background: #2d2d2d; color: #54a0ff; }
-        .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; }
-        .config-group { display: flex; flex-direction: column; }
-        .config-group label { font-size: 13px; color: #aaa; margin-bottom: 5px; }
-        select { background: #333; color: white; border: 1px solid #444; padding: 8px; border-radius: 6px; font-size: 14px; cursor: pointer; }
-        input[type="file"] { background: #333; padding: 10px; border-radius: 6px; border: 1px solid #444; color: #fff; cursor: pointer; width: 100%; box-sizing: border-box; }
+        .instruction-banner { font-size: 15px; background: #2980b9; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; text-align: center; transition: 0.2s; }
+
+        #snapshot-preview { width: 100%; border-radius: 6px; border: 1px solid #444; margin-top: 15px; display: none; }
+        #single-label-print-card { display: none; }
+
+        @media print {
+            body { background: white !important; color: black !important; padding: 0; margin: 0; }
+            #app-container, .window-box, .instruction-banner, .btn, h2, h3, label, video, table, .connection-badge { display: none !important; }
+            body.print-single-mode #single-label-print-card { display: block !important; }
+            body.print-batch-mode #batch-log-box { display: block !important; background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; width: 100% !important; }
+            body.print-batch-mode table { display: table !important; width: 100% !important; color: black !important; background: white !important; margin-top: 0 !important; }
+            body.print-batch-mode tr { page-break-inside: avoid; }
+            body.print-batch-mode th, body.print-batch-mode td { border: 1px solid #000 !important; padding: 8px !important; color: black !important; }
+            body.print-batch-mode th { background: #eaeaea !important; font-weight: bold !important; }
+        }
     </style>
 </head>
 <body>
 
+<div id="network-status-badge" class="connection-badge status-online">● Checking Network Status</div>
+
 <div id="app-container">
-    <h2>Yeti AI Web Scanner Put-Away</h2>
+    <h2>AI Web Scanner Put-Away</h2>
+    
+    <div class="window-box" style="background: #1e272e; border-color: #3d3d3d; margin-bottom: 15px;">
+        <strong style="color: #54a0ff; font-size: 15px;">⌨️ Warehouse Terminal Control Hotkeys Quick-Reference:</strong>
+        <ul style="margin: 8px 0 0 20px; padding: 0; font-size: 14px; color: #dcdde1; line-height: 1.6; text-align: left;">
+            <li><strong>SPACEBAR:</strong> <span style="color:#2e86de; font-weight:bold;">[Step 1]</span> Trigger Snapshot Scan ➡️ <span style="color:#10ac84; font-weight:bold;">[Step 2]</span> Accept Match Target ➡️ <span style="color:#9b59b6; font-weight:bold;">[Step 3]</span> Fire Single Label Ticket Print</li>
+            <li><strong>M (Modify):</strong> Tap during Match Review to shift focus to candidate selection lists (Use Up/Down Arrows)</li>
+            <li><strong>D (Delete / Clear):</strong> Tap during Match Review to completely cancel the current item scan data container</li>
+            <li><strong>C (Cancel Print):</strong> Tap during Print Prompt selection to skip label ticket compilation and return cleanly to Idle Standby</li>
+        </ul>
+    </div>
+
+    <div id="workflow-guide" class="instruction-banner">System Ready. Tap SPACEBAR to trigger camera scan.</div>
     
     <div class="window-box">
         <h3>1. Smart Inventory Initialization</h3>
-        <div style="display:grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: end;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
             <div>
-                <label style="display:block; margin-bottom: 5px; color:#aaa;">Select Master Lookup File (.csv, .xls, .xlsx):</label>
-                <input type="file" id="excel-file-picker" accept=".xlsx, .xls, .csv" onchange="handleFileLoad(this)">
+                <label style="display:block; margin-bottom: 5px; color:#aaa; font-size:13px;">Select Master Lookup File (.csv, .xls, .xlsx):</label>
+                <input type="file" id="excel-file-picker" accept=".xlsx, .xls, .csv" onchange="handleFileLoad(this)" style="background:#333; padding:8px; border-radius:6px; color:white; width:100%;">
+                <div id="sheet-wrapper" style="display:none; flex-direction:column; margin-top: 10px;">
+                    <label style="font-size:13px; color:#aaa; margin-bottom:5px;">Target Tab:</label>
+                    <select id="sheet-selector" onchange="parseSelectedSheet()"></select>
+                </div>
             </div>
-            <div class="config-group" id="sheet-wrapper" style="display:none;">
-                <label>Select Target Sheet/Tab:</label>
-                <select id="sheet-selector" onchange="parseSelectedSheet()"></select>
+            <div>
+                <label style="display:block; margin-bottom: 5px; color:#aaa; font-size:13px;">Upload Custom Label Layout Template (.html):</label>
+                <div style="font-size:12px; color:#888; margin-bottom:8px;">Design your HTML template using the <strong>{{BIN}}</strong>, <strong>{{PRODUCT}}</strong>, and <strong>{{QUANTITY}}</strong> variables.</div>
+                <input type="file" id="template-file-picker" accept=".html" onchange="handleTemplateLoad(this)" style="background:#333; padding:8px; border-radius:6px; color:white; width:100%;">
+                <div id="template-status" style="font-size: 13px; font-weight: bold; color: #ff6b6b; margin-top: 10px;">Template Status: Using Default Built-In Card Layout</div>
             </div>
         </div>
 
-        <div class="config-grid" id="mapping-panel" style="display:none; border-top: 1px solid #333; padding-top: 15px;">
-            <div class="config-group">
-                <label>Product Name / Description Column:</label>
+        <div id="mapping-panel" style="display:none; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; border-top: 1px solid #333; padding-top: 15px;">
+            <div>
+                <label style="font-size:13px; color:#aaa;">Product Description Column:</label>
                 <select id="col-product-selector" onchange="buildInventoryCache()"></select>
             </div>
-            <div class="config-group">
-                <label>Bin Location / Comments Column:</label>
+            <div>
+                <label style="font-size:13px; color:#aaa;">Bin Location Column:</label>
                 <select id="col-bin-selector" onchange="buildInventoryCache()"></select>
             </div>
         </div>
-        <div id="db-status" style="font-weight: bold; color: #ff6b6b; margin-top: 15px;">Status: File Not Loaded</div>
+        <div style="display: flex; justify-content: space-between; margin-top: 12px; font-size: 14px;">
+            <div id="db-status" style="font-weight: bold; color: #ff6b6b;">Status: Inventory Disconnected</div>
+            <div id="config-status" style="color: #888;">Config: Loading system parameters...</div>
+        </div>
     </div>
 
     <div class="grid-layout">
         <div class="window-box">
-            <h3>2. Live Video Capture</h3>
+            <h3>Camera Interface</h3>
             <video id="preview" autoplay playsinline></video>
-            <div id="camera-status" class="status-badge">Camera Disconnected</div>
-            <p style="color:#888; font-size:13px; margin-top:10px;">Tap <strong>Spacebar</strong> to scan.</p>
+            <div id="camera-status" class="status-badge state-idle">Idle Standby</div>
         </div>
 
-        <div class="window-box">
-            <h3>3. Decision Match Matrix</h3>
-            <div id="match-output">Waiting for frame trigger...</div>
-            <div id="match-details" style="margin-top: 15px; font-size: 14px; color: #aaa;"></div>
+        <div class="window-box" style="display: flex; flex-direction: column;">
+            <h3>Decision Matrix Match</h3>
+            
+            <div id="review-panel" style="flex-grow: 1;">
+                <div id="match-header" style="font-size: 16px; font-weight: bold; margin-bottom: 10px;"></div>
+                <label style="font-size:13px; color:#aaa;">Verified Match Target Assignment:</label>
+                <select id="review-choice-dropdown" onchange="handleDropdownSelectionChange()"></select>
+                
+                <div id="manual-input-container" style="display: none; margin-top: 12px; border-top: 1px solid #555; padding-top: 10px;">
+                    <label style="font-size:13px; color:#ff9f43;">Manual Product Description Name:</label>
+                    <input type="text" id="manual-prod-input" placeholder="Type item model name...">
+                    <label style="font-size:13px; color:#ff9f43; display:block; margin-top:8px;">Manual Bin Target Destination:</label>
+                    <input type="text" id="manual-bin-input" placeholder="Type bin identifier...">
+                </div>
+
+                <img id="snapshot-preview" alt="Scan Verification Frame">
+            </div>
+
+            <div id="print-prompt-panel">
+                <span style="font-size: 42px; display:block; margin-bottom:10px;">🖨️</span>
+                <span style="font-size: 20px; font-weight: bold; color: #a29bfe; display:block; margin-bottom:5px;">Print Location Put-away Ticket?</span>
+                <p style="color:#bbb; font-size:14px; margin: 0 0 15px 0;">Entry successfully committed to local run record data blocks.</p>
+                <div style="font-size: 13px; background:rgba(255,255,255,0.05); padding:10px; border-radius:6px; color:#9b59b6; font-weight:bold;">
+                    Press SPACEBAR to PRINT INDIVIDUAL BOX TICKET | Press C to SKIP
+                </div>
+            </div>
+            
+            <div id="idle-prompt" style="color: #888; font-style: italic; text-align: center; margin-top: 40px; line-height: 1.5;">
+                Waiting for hardware frame capture...
+                <span id="requirement-warning" style="color: #ee5253; font-weight: bold; font-size: 13px; display: block; margin-top: 12px; font-style: normal; background: rgba(238, 82, 83, 0.1); border: 1px dashed #ee5253; padding: 10px; border-radius: 6px;">
+                    ⚠️ Operational Requirement: You must upload an active inventory sheet file above before triggering scans.
+                </span>
+            </div>
         </div>
     </div>
 
-    <div class="window-box">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h3>4. Current Processing Batch Run</h3>
-            <button class="btn btn-success" onclick="exportBatchToExcel()">Export Print Sheet (.xlsx)</button>
+    <div class="window-box" id="batch-log-box">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <h3>Current Processing Batch Run</h3>
+            <div>
+                <button class="btn btn-secondary" onclick="executeBatchPrintRouter()">Print Manifest List</button>
+                <button class="btn" onclick="exportBatchToExcel()">Export Excel (.xlsx)</button>
+                <button class="btn btn-danger" onclick="triggerClearBatchWorkflow()">Clear Batch</button>
+            </div>
         </div>
         <table id="batch-table">
             <thead>
                 <tr>
                     <th>Timestamp</th>
-                    <th>Scanned Text</th>
+                    <th>Qty</th>
+                    <th>Raw Scanned Label</th>
                     <th>Matched Product Name</th>
                     <th>Bin Location</th>
                 </tr>
@@ -96,16 +191,33 @@
     </div>
 </div>
 
+<div id="single-label-print-card"></div>
+
 <script>
-    console.log("🚀 Script section loading...");
+    let appState = 'IDLE';
+    let appConfig = null; 
 
     const videoEl = document.getElementById('preview');
     const cameraStatusEl = document.getElementById('camera-status');
     const dbStatusEl = document.getElementById('db-status');
-    const matchOutputEl = document.getElementById('match-output');
-    const matchDetailsEl = document.getElementById('match-details');
-    const batchTableBody = document.querySelector('#batch-table tbody');
+    const configStatusEl = document.getElementById('config-status');
+    const templateStatusEl = document.getElementById('template-status');
+    const workflowGuideEl = document.getElementById('workflow-guide');
+    const requirementWarning = document.getElementById('requirement-warning');
+    const networkStatusBadge = document.getElementById('network-status-badge');
     
+    const reviewPanel = document.getElementById('review-panel');
+    const printPromptPanel = document.getElementById('print-prompt-panel');
+    const idlePrompt = document.getElementById('idle-prompt');
+    const matchHeaderEl = document.getElementById('match-header');
+    const choiceDropdown = document.getElementById('review-choice-dropdown');
+    const manualInputContainer = document.getElementById('manual-input-container');
+    const manualProdInput = document.getElementById('manual-prod-input');
+    const manualBinInput = document.getElementById('manual-bin-input');
+    const batchTableBody = document.querySelector('#batch-table tbody');
+    const snapshotPreview = document.getElementById('snapshot-preview');
+    const singleLabelPrintCard = document.getElementById('single-label-print-card');
+
     const sheetWrapper = document.getElementById('sheet-wrapper');
     const sheetSelector = document.getElementById('sheet-selector');
     const mappingPanel = document.getElementById('mapping-panel');
@@ -116,67 +228,184 @@
     let rawSheetMatrix = []; 
     let masterInventoryCache = [];
     let scannedBatchRows = [];
-    let isProcessing = false;
+    let topMatchCandidates = []; 
+    let activeAiTextRead = "";
+    let activeCapturedQty = ""; 
 
-    // Initialize Camera Stream
+    let lastLoggedProduct = "";
+    let lastLoggedBin = "";
+    let lastLoggedQty = "";
+
+    let htmlLabelTemplateString = `
+        <div style="font-family:'Courier New', monospace; text-align:center; padding:30px; border:4px solid #000; border-radius:12px; width:450px; margin:40px auto;">
+            <div style="font-size:28px; font-weight:bold; margin-bottom:5px;">{{QUANTITY}}</div>
+            <div>TARGET DESTINATION BIN:</div>
+            <div style="font-size:64px; font-weight:bold; letter-spacing:2px; margin:15px 0; border-bottom:2px dashed #000; padding-bottom:10px;">{{BIN}}</div>
+            <div style="font-size:20px; font-weight:bold; line-height:1.4;">{{PRODUCT}}</div>
+        </div>
+    `;
+
+    // Progressive Web App Installation Service Worker Hookup
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+                .then(() => console.log("Service Worker Operations Registered Successfully"))
+                .catch(err => console.error("Service worker registration stalled:", err));
+        });
+    }
+
+    // Interactive Real-time Network Monitoring Handlers
+    function updateNetworkStatusIndicator() {
+        if (navigator.onLine) {
+            networkStatusBadge.textContent = "● ONLINE (Cloud Gemini OCR)";
+            networkStatusBadge.className = "connection-badge status-online";
+        } else {
+            networkStatusBadge.textContent = "● OFFLINE (Local Tesseract Backup)";
+            networkStatusBadge.className = "connection-badge status-offline";
+        }
+    }
+    window.addEventListener('online', updateNetworkStatusIndicator);
+    window.addEventListener('offline', updateNetworkStatusIndicator);
+
+    async function loadSystemConfiguration() {
+        try {
+            const response = await fetch('/config.json');
+            if (!response.ok) throw new Error("File missing or unreadable");
+            appConfig = await response.json();
+            configStatusEl.textContent = "Config: Connected (Loaded active dials)";
+            configStatusEl.style.color = "#10ac84";
+        } catch (err) {
+            console.error("Configuration payload missing. Initializing fallback rules:", err);
+            appConfig = {
+                "system_dials": { "auto_accept_threshold": 85.0, "gatekeeper_warning_threshold": 45.0, "max_dropdown_candidates": 5 },
+                "algorithmic_weights": { "use_hybrid_engine": true, "levenshtein_weight": 0.4, "sorensen_dice_weight": 0.6 },
+                "token_typing_rules": { "numeric_strictness": 1.0, "alphabetic_strictness": 0.6, "alphanumeric_strictness": 0.9, "missing_numeric_penalty_multiplier": 2.5 },
+                "domain_modifiers": { "strip_hyphens_before_match": true, "ignore_leading_zeros_on_numbers": true },
+                "extraction_rules": { "use_line_anchor": true, "anchor_capture_pattern": "^([0-9]+x)-", "isolate_search_text": true },
+                "output_formatting": { "include_extracted_quantity": true, "fallback_quantity_if_missing": "1x" },
+                "noise_filters": { "global_stopwords": ["intl", "ms", "box", "handling", "quantity", "one", "of", "qty", "count"], "ignore_single_characters": true, "always_strip_characters": "[^a-zA-Z0-9 ]" }
+            };
+            configStatusEl.textContent = "Config: Disconnected (Using fallback hybrid rules)";
+            configStatusEl.style.color = "#ee5253";
+        }
+    }
+
+    async function bootApplicationEngine() {
+        updateNetworkStatusIndicator();
+        await loadSystemConfiguration();
+
+        const cachedMaster = localStorage.getItem('yeti_master_cache');
+        const cachedBatch = localStorage.getItem('yeti_scanned_batch');
+        const cachedTemplate = localStorage.getItem('yeti_custom_html_template');
+
+        if (cachedMaster) {
+            masterInventoryCache = JSON.parse(cachedMaster);
+            dbStatusEl.textContent = `Persistent Session Restored: Cached Master List Active (${masterInventoryCache.length} Rows Configured)`;
+            dbStatusEl.style.color = "#10ac84";
+            if (requirementWarning) requirementWarning.style.display = "none";
+        }
+        if (cachedBatch) {
+            scannedBatchRows = JSON.parse(cachedBatch);
+            renderTableDOM();
+        }
+        if (cachedTemplate) {
+            htmlLabelTemplateString = cachedTemplate;
+            templateStatusEl.textContent = "Template Status: Custom Layout Blueprint Active from Long-term Cache";
+            templateStatusEl.style.color = "#10ac84";
+        }
+        initializeCamera();
+    }
+
     async function initializeCamera() {
-        console.log("🎬 Requesting camera devices...");
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" }
             });
             videoEl.srcObject = stream;
-            cameraStatusEl.textContent = "Camera Live (HD Ready)";
-            cameraStatusEl.className = "status-badge connected";
-            console.log("✅ Camera feed successfully attached.");
+            setAppState('IDLE');
         } catch (err) {
-            console.error("❌ Camera failed:", err);
             cameraStatusEl.textContent = "Error: Camera Blocked";
         }
     }
 
-    // Load file stream into SheetJS
+    function setAppState(newState) {
+        appState = newState;
+        if (newState === 'IDLE') {
+            cameraStatusEl.textContent = "Idle Standby";
+            cameraStatusEl.className = "status-badge state-idle";
+            workflowGuideEl.textContent = "System Ready. Tap SPACEBAR to scan package labels.";
+            workflowGuideEl.style.background = "#2980b9";
+            reviewPanel.style.display = "none";
+            printPromptPanel.style.display = "none";
+            idlePrompt.style.display = "block";
+            manualInputContainer.style.display = "none";
+            snapshotPreview.style.display = "none";
+            snapshotPreview.src = ""; 
+            choiceDropdown.innerHTML = "";
+        } else if (newState === 'PROCESSING') {
+            cameraStatusEl.textContent = "AI Reading...";
+            cameraStatusEl.className = "status-badge state-loading";
+            workflowGuideEl.textContent = "Processing snapshot frame extraction layers...";
+            workflowGuideEl.style.background = "#f1c40f";
+        } else if (newState === 'REVIEW') {
+            cameraStatusEl.textContent = "Review Stage";
+            cameraStatusEl.className = "status-badge state-review";
+            workflowGuideEl.innerHTML = "Press <strong>SPACEBAR</strong> to Accept match entry | Press <strong>M</strong> to Modify selection list | Press <strong>D</strong> to Cancel/Delete scan";
+            workflowGuideEl.style.background = "#10ac84";
+            idlePrompt.style.display = "none";
+            printPromptPanel.style.display = "none";
+            reviewPanel.style.display = "block";
+        } else if (newState === 'PRINT_PROMPT') {
+            cameraStatusEl.textContent = "Print Query";
+            cameraStatusEl.className = "status-badge state-print";
+            workflowGuideEl.innerHTML = "🖨️ Print Prompt: Press <strong>SPACEBAR</strong> to Print Current Box Ticket | Press <strong>C</strong> to Skip and clear camera";
+            workflowGuideEl.style.background = "#9b59b6";
+            idlePrompt.style.display = "none";
+            reviewPanel.style.display = "none";
+            printPromptPanel.style.display = "block";
+        }
+    }
+
+    function handleTemplateLoad(input) {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            htmlLabelTemplateString = e.target.result;
+            localStorage.setItem('yeti_custom_html_template', htmlLabelTemplateString);
+            templateStatusEl.textContent = "Template Status: Custom Blueprint Loaded and Saved Successfully!";
+            templateStatusEl.style.color = "#10ac84";
+        };
+        reader.readAsText(file);
+    }
+
     function handleFileLoad(input) {
         const file = input.files[0];
         if (!file) return;
-
-        dbStatusEl.textContent = "Reading file payload...";
+        dbStatusEl.textContent = "Reading file records...";
         dbStatusEl.style.color = "#f1c40f";
 
         const reader = new FileReader();
         reader.onload = function(e) {
             const data = new Uint8Array(e.target.result);
             currentWorkbook = XLSX.read(data, { type: 'array' });
-            
             sheetSelector.innerHTML = "";
             currentWorkbook.SheetNames.forEach(name => {
-                const opt = document.createElement('option');
-                opt.value = name;
-                opt.textContent = name;
+                const opt = document.createElement('option'); opt.value = name; opt.textContent = name;
                 sheetSelector.appendChild(opt);
             });
-
             if (currentWorkbook.SheetNames.includes("Custom Item and Location List")) {
                 sheetSelector.value = "Custom Item and Location List";
             }
-
-            if (currentWorkbook.SheetNames.length <= 1) {
-                sheetWrapper.style.display = "none";
-            } else {
-                sheetWrapper.style.display = "flex";
-            }
-
+            sheetWrapper.style.display = currentWorkbook.SheetNames.length <= 1 ? "none" : "flex";
             parseSelectedSheet();
         };
         reader.readAsArrayBuffer(file);
     }
 
-    // Open selected tab and extract headers
     function parseSelectedSheet() {
         if (!currentWorkbook) return;
-        const targetSheetName = sheetSelector.value;
-        const sheet = currentWorkbook.Sheets[targetSheetName];
-        
+        const sheet = currentWorkbook.Sheets[sheetSelector.value];
         rawSheetMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1 });
         if (rawSheetMatrix.length === 0) return;
 
@@ -186,20 +415,12 @@
         }
 
         const headers = rawSheetMatrix[headerRowIdx] || [];
-        colProductSelector.innerHTML = "";
-        colBinSelector.innerHTML = "";
-
+        colProductSelector.innerHTML = ""; colBinSelector.innerHTML = "";
         headers.forEach((headerText, colIndex) => {
             const cleanText = headerText ? String(headerText).trim() : `Column ${colIndex + 1}`;
-            
-            const optP = document.createElement('option');
-            optP.value = colIndex;
-            optP.textContent = cleanText;
+            const optP = document.createElement('option'); optP.value = colIndex; optP.textContent = cleanText;
             colProductSelector.appendChild(optP);
-
-            const optB = document.createElement('option');
-            optB.value = colIndex;
-            optB.textContent = cleanText;
+            const optB = document.createElement('option'); optB.value = colIndex; optB.textContent = cleanText;
             colBinSelector.appendChild(optB);
         });
 
@@ -213,10 +434,8 @@
         buildInventoryCache();
     }
 
-    // Build functional cache
     function buildInventoryCache() {
         if (rawSheetMatrix.length <= 1) return;
-
         const productIdx = parseInt(colProductSelector.value);
         const binIdx = parseInt(colBinSelector.value);
 
@@ -228,134 +447,367 @@
             }))
             .filter(item => item.description !== "");
 
-        dbStatusEl.textContent = `Ready: Connected to ${masterInventoryCache.length} Active Rows mapped dynamically.`;
+        localStorage.setItem('yeti_master_cache', JSON.stringify(masterInventoryCache));
+        dbStatusEl.textContent = `Ready: Connected to ${masterInventoryCache.length} Rows. Master Saved to LocalStorage.`;
         dbStatusEl.style.color = "#10ac84";
+        if (requirementWarning) requirementWarning.style.display = "none";
     }
 
-    // Fuzzy Matcher Engine
-    function calculateFuzzyMatch(scannedStr, masterStr) {
-        const cleanTokens = (str) => str.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
-        const scannedTokens = cleanTokens(scannedStr);
-        const masterTokens = cleanTokens(masterStr);
+    // --- STRATEGIC FUZZY LOGIC ENGINES ---
 
-        if (scannedTokens.length === 0 || masterTokens.length === 0) return 0;
-
-        let intersectionCount = 0;
-        scannedTokens.forEach(token => {
-            if (masterTokens.some(mToken => mToken.includes(token) || token.includes(mToken))) {
-                intersectionCount++;
+    function calculateWordDiceRatio(sToken, mToken) {
+        const getBigrams = (str) => {
+            const clean = str.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const grams = [];
+            for (let i = 0; i < clean.length - 1; i++) grams.push(clean.substring(i, i + 2));
+            return grams;
+        };
+        const b1 = getBigrams(sToken); const b2 = getBigrams(mToken);
+        if (b1.length === 0 || b2.length === 0) return sToken.toLowerCase() === mToken.toLowerCase() ? 100 : 0;
+        let matches = 0; const visited = new Array(b2.length).fill(false);
+        b1.forEach(gram => {
+            for (let i = 0; i < b2.length; i++) {
+                if (!visited[i] && gram === b2[i]) { matches++; visited[i] = true; break; }
             }
         });
-
-        return (intersectionCount / Math.max(scannedTokens.length, masterTokens.length)) * 100;
+        return (2 * matches) / (b1.length + b2.length) * 100;
     }
 
-    // Capture Frame and Call API
-    async function executeScanWorkflow() {
-        if (isProcessing) return;
-        if (masterInventoryCache.length === 0) {
-            alert("Please load an inventory data sheet file first.");
-            return;
+    function calculateLevenshteinDistance(a, b) {
+        const matrix = [];
+        for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+        for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                if (b.charAt(i - 1) == a.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
+                }
+            }
+        }
+        return matrix[b.length][a.length];
+    }
+
+    function tokenizeAndClean(str) {
+        let s = str.toLowerCase();
+        if (appConfig.domain_modifiers.strip_hyphens_before_match) {
+            s = s.replace(/-/g, ' '); 
+        }
+        const cleanCharRegex = new RegExp(appConfig.noise_filters.always_strip_characters, "g");
+        s = s.replace(cleanCharRegex, '');
+
+        let tokens = s.split(/\s+/).filter(Boolean);
+
+        tokens = tokens.map(t => {
+            if (appConfig.domain_modifiers.ignore_leading_zeros_on_numbers && /^0+[1-9]\d*$/.test(t)) {
+                return t.replace(/^0+/, '');
+            }
+            return t;
+        });
+
+        const stopWords = appConfig.noise_filters.global_stopwords || [];
+        tokens = tokens.filter(t => !stopWords.includes(t));
+
+        if (appConfig.noise_filters.ignore_single_characters) {
+            tokens = tokens.filter(t => t.length > 1 || /^\d$/.test(t)); 
+        }
+        return tokens;
+    }
+
+    function advancedWarehouseFuzzyMatch(scanStr, masterStr) {
+        const scanTokens = tokenizeAndClean(scanStr);
+        const masterTokens = tokenizeAndClean(masterStr);
+
+        if (scanTokens.length === 0 || masterTokens.length === 0) return 0;
+
+        let totalWeightedScoreSum = 0;
+        let totalWeightLoadBalance = 0;
+        let missingNumericPenaltyCount = 0;
+
+        scanTokens.forEach(sToken => {
+            let isNumeric = /^\d+$/.test(sToken);
+            let isAlpha = /^[a-z]+$/.test(sToken);
+
+            let appliedWeight = isNumeric ? appConfig.token_typing_rules.numeric_strictness :
+                               (isAlpha ? appConfig.token_typing_rules.alphabetic_strictness :
+                               appConfig.token_typing_rules.alphanumeric_strictness);
+
+            let maxTokenScore = 0;
+            let exactMatchFound = false;
+
+            masterTokens.forEach(mToken => {
+                if (sToken === mToken) exactMatchFound = true;
+
+                let score = 0;
+                if (appConfig.algorithmic_weights.use_hybrid_engine) {
+                    const dice = calculateWordDiceRatio(sToken, mToken);
+                    const levDist = calculateLevenshteinDistance(sToken, mToken);
+                    const maxLength = Math.max(sToken.length, mToken.length);
+                    const levScore = maxLength === 0 ? 100 : ((maxLength - levDist) / maxLength) * 100;
+
+                    score = (dice * appConfig.algorithmic_weights.sorensen_dice_weight) +
+                            (levScore * appConfig.algorithmic_weights.levenshtein_weight);
+                } else {
+                    score = calculateWordDiceRatio(sToken, mToken);
+                }
+
+                if (score > maxTokenScore) maxTokenScore = score;
+            });
+
+            if (isNumeric && !exactMatchFound) {
+                missingNumericPenaltyCount++;
+            }
+
+            totalWeightedScoreSum += (maxTokenScore * appliedWeight);
+            totalWeightLoadBalance += appliedWeight;
+        });
+
+        let finalScore = totalWeightedScoreSum / totalWeightLoadBalance;
+
+        if (missingNumericPenaltyCount > 0) {
+            const penalty = (appConfig.token_typing_rules.missing_numeric_penalty_multiplier * 10) * missingNumericPenaltyCount;
+            finalScore -= penalty;
         }
 
-        isProcessing = true;
-        matchOutputEl.style.display = "block";
-        matchOutputEl.className = "loading";
-        matchOutputEl.textContent = "AI Reading Label...";
+        return Math.max(0, finalScore);
+    }
+
+    // --- BULLETPROOF SCANNING WORKFLOW PIPELINE ---
+
+    async function executeScanWorkflow() {
+        if (masterInventoryCache.length === 0) { alert("Load inventory metrics data file registers first."); return; }
+        setAppState('PROCESSING');
 
         try {
             const canvas = document.createElement('canvas');
-            canvas.width = videoEl.videoWidth || 1280;
-            canvas.height = videoEl.videoHeight || 720;
+            canvas.width = videoEl.videoWidth || 1280; canvas.height = videoEl.videoHeight || 720;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
             
             const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
             const base64Image = dataUrl.split(',')[1];
 
-            const response = await fetch('/api/extract', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image_base64: base64Image })
-            });
+            snapshotPreview.src = dataUrl;
+            snapshotPreview.style.display = "block";
 
-            const data = await response.json();
-            if (!response.ok || !data.text) throw new Error(data.error || "OCR failed");
-
-            const aiText = data.text;
-            let bestMatch = null;
-            let highestScore = -1;
-
-            masterInventoryCache.forEach(item => {
-                const score = calculateFuzzyMatch(aiText, item.description);
-                if (score > highestScore) {
-                    highestScore = score;
-                    bestMatch = item;
+            // Conditional Fallback Layer: Check routing path viability
+            if (navigator.onLine) {
+                try {
+                    const response = await fetch('/api/extract', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image_base64: base64Image })
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.text) throw new Error("Cloud pipe broken");
+                    activeAiTextRead = data.text;
+                } catch (cloudErr) {
+                    console.warn("Cloud OCR timed out or failed. Activating Tesseract Local backup...");
+                    activeAiTextRead = await runLocalTesseractOCR(canvas);
                 }
-            });
-
-            if (bestMatch && highestScore >= 50) {
-                matchOutputEl.className = "match-success";
-                matchOutputEl.innerHTML = `Bin: ${bestMatch.location}`;
-                matchDetailsEl.innerHTML = `<strong>AI Read:</strong> "${aiText}"<br><strong>Matched Row:</strong> ${bestMatch.description} (${highestScore.toFixed(0)}% Confidence)`;
-
-                const newRow = {
-                    timestamp: new Date().toLocaleTimeString(),
-                    scannedText: aiText,
-                    matchedProduct: bestMatch.description,
-                    binLocation: bestMatch.location
-                };
-                scannedBatchRows.push(newRow);
-                
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${newRow.timestamp}</td><td>${newRow.scannedText}</td><td>${newRow.matchedProduct}</td><td style="font-weight:bold; color:#54a0ff;">${newRow.binLocation}</td>`;
-                batchTableBody.insertBefore(tr, batchTableBody.firstChild);
-
             } else {
-                matchOutputEl.className = "match-fail";
-                matchOutputEl.textContent = "No Valid Match Found";
-                matchDetailsEl.innerHTML = `<strong>AI Read:</strong> "${aiText}" but similarity fell below constraints.`;
+                console.log("Device is offline. Bypassing cloud, processing with Tesseract.js...");
+                activeAiTextRead = await runLocalTesseractOCR(canvas);
             }
 
+            // Clean string payload outputs
+            activeCapturedQty = appConfig.output_formatting.fallback_quantity_if_missing || "1x";
+            let lookUpSearchText = activeAiTextRead;
+
+            if (appConfig.extraction_rules && appConfig.extraction_rules.use_line_anchor) {
+                const anchorRegex = new RegExp(appConfig.extraction_rules.anchor_capture_pattern, "i");
+                const anchorMatch = activeAiTextRead.match(anchorRegex);
+                
+                if (anchorMatch) {
+                    activeCapturedQty = anchorMatch[1]; 
+                    if (appConfig.extraction_rules.isolate_search_text) {
+                        lookUpSearchText = activeAiTextRead.substring(anchorMatch[0].length).trim();
+                    }
+                }
+            }
+
+            const scoredList = masterInventoryCache.map(item => ({
+                item: item, score: advancedWarehouseFuzzyMatch(lookUpSearchText, item.description)
+            }));
+            scoredList.sort((a, b) => b.score - a.score);
+
+            const sliceLimit = appConfig.system_dials.max_dropdown_candidates;
+            topMatchCandidates = scoredList.slice(0, sliceLimit);
+            const highestScore = topMatchCandidates[0] ? topMatchCandidates[0].score : 0;
+
+            const targetClosenessLimit = 1.0;
+            const gatekeeperFloor = appConfig.system_dials.gatekeeper_warning_threshold;
+            const competingClusteredCount = scoredList.filter(x => (highestScore - x.score) <= targetClosenessLimit && x.score >= gatekeeperFloor).length;
+
+            choiceDropdown.innerHTML = "";
+            topMatchCandidates.forEach((cand, idx) => {
+                const opt = document.createElement('option'); opt.value = idx;
+                opt.textContent = `[Score: ${cand.score.toFixed(0)}%] ${cand.item.description} -> Bin: ${cand.item.location}`;
+                choiceDropdown.appendChild(opt);
+            });
+
+            const customOpt = document.createElement('option'); customOpt.value = "CUSTOM";
+            customOpt.textContent = "➕ Create Completely New Entry Override...";
+            choiceDropdown.appendChild(customOpt);
+
+            if (highestScore >= gatekeeperFloor) {
+                reviewPanel.classList.remove('gatekeeper-warning');
+                if (competingClusteredCount > 1) {
+                    matchHeaderEl.innerHTML = `⚠️ Multiple choices found at <span style="color:#f1c40f;">${highestScore.toFixed(0)}%</span> confidence! Verify dropdown.`;
+                } else {
+                    matchHeaderEl.innerHTML = `🎯 One distinct match found at <span style="color:#10ac84;">${highestScore.toFixed(0)}%</span> confidence.`;
+                }
+            } else {
+                reviewPanel.classList.add('gatekeeper-warning');
+                matchHeaderEl.innerHTML = `⚠️ Mismatch Alert! Read: <span style="color:#ee5253;">"${activeAiTextRead}"</span> (Unrelated?)`;
+            }
+
+            setAppState('REVIEW');
         } catch (err) {
-            matchOutputEl.className = "match-fail";
-            matchOutputEl.textContent = "Extraction Error";
-            matchDetailsEl.textContent = err.message;
-        } finally {
-            isProcessing = false;
+            alert(`Scanning pipeline system exception: ${err.message}`);
+            setAppState('IDLE');
         }
     }
 
-    // Export Batch Out
-    function exportBatchToExcel() {
-        if (scannedBatchRows.length === 0) {
-            alert("No collected warehouse records present to batch export.");
-            return;
+    // Local Browser WebAssembly OCR Compilation Engine
+    async function runLocalTesseractOCR(canvasDomElement) {
+        try {
+            // Force the worker thread to utilize our explicit pre-cached CDN endpoints
+            const worker = await Tesseract.createWorker('eng', 1, {
+                workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
+                corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core.wasm.js',
+                langPath: 'https://tessdata.projectnaptha.com/4.0.0_best'
+            });
+            
+            const response = await worker.recognize(canvasDomElement);
+            await worker.terminate(); // Free up terminal thread memory immediately on the tablet/computer
+            return response.data.text ? response.data.text.trim() : "";
+        } catch (err) {
+            console.error("Local WebAssembly OCR engine failed:", err);
+            return "";
+        }
+    }
+
+    function handleDropdownSelectionChange() {
+        if (choiceDropdown.value === "CUSTOM") {
+            manualInputContainer.style.display = "block";
+            manualProdInput.value = activeAiTextRead;
+            manualBinInput.value = "";
+            manualProdInput.focus();
+        } else {
+            manualInputContainer.style.display = "none";
+        }
+    }
+
+    function commitReviewSelection() {
+        let finalProductDescription = ""; let finalBinLocation = "";
+
+        if (choiceDropdown.value === "CUSTOM") {
+            finalProductDescription = manualProdInput.value.trim();
+            finalBinLocation = manualBinInput.value.trim();
+            if (!finalProductDescription || !finalBinLocation) {
+                alert("Complete manual override fields prior to data commits."); return;
+            }
+        } else {
+            const chosenCandidate = topMatchCandidates[parseInt(choiceDropdown.value)];
+            finalProductDescription = chosenCandidate.item.description;
+            finalBinLocation = chosenCandidate.item.location;
         }
 
+        lastLoggedProduct = finalProductDescription;
+        lastLoggedBin = finalBinLocation;
+        lastLoggedQty = activeCapturedQty; 
+
+        const newRow = {
+            timestamp: new Date().toLocaleTimeString(),
+            quantity: activeCapturedQty,
+            scannedText: activeAiTextRead,
+            matchedProduct: finalProductDescription,
+            binLocation: finalBinLocation
+        };
+        scannedBatchRows.push(newRow);
+        
+        localStorage.setItem('yeti_scanned_batch', JSON.stringify(scannedBatchRows));
+        renderTableDOM();
+        
+        setAppState('PRINT_PROMPT');
+    }
+
+    function executeSingleLabelPrintRouter() {
+        let outputQtyString = appConfig.output_formatting.include_extracted_quantity ? lastLoggedQty : "";
+        
+        let translatedTemplateOutput = htmlLabelTemplateString
+            .replace(/{{BIN}}/g, lastLoggedBin)
+            .replace(/{{PRODUCT}}/g, lastLoggedProduct)
+            .replace(/{{QUANTITY}}/g, outputQtyString);
+
+        singleLabelPrintCard.innerHTML = translatedTemplateOutput;
+
+        document.body.classList.add('print-single-mode');
+        window.print();
+        document.body.classList.remove('print-single-mode');
+        
+        setAppState('IDLE');
+    }
+
+    function executeBatchPrintRouter() {
+        if (scannedBatchRows.length === 0) { alert("Batch table list is completely empty."); return; }
+        document.body.classList.add('print-batch-mode');
+        window.print();
+        document.body.classList.remove('print-batch-mode');
+    }
+
+    function renderTableDOM() {
+        batchTableBody.innerHTML = "";
+        for (let i = scannedBatchRows.length - 1; i >= 0; i--) {
+            const row = scannedBatchRows[i];
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${row.timestamp}</td><td style="font-weight:bold; color:#f1c40f;">${row.quantity || "1x"}</td><td>${row.scannedText}</td><td>${row.matchedProduct}</td><td style="font-weight:bold; color:#54a0ff;">${row.binLocation}</td>`;
+            batchTableBody.appendChild(tr);
+        }
+    }
+
+    function triggerClearBatchWorkflow() {
+        const verification = confirm("WARNING: You are about to completely clear the active batch table data. Are you sure you want to proceed?");
+        if (verification) {
+            scannedBatchRows = [];
+            localStorage.removeItem('yeti_scanned_batch');
+            renderTableDOM();
+            setAppState('IDLE');
+        }
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (appState === 'IDLE') {
+            if (e.code === 'Space') { e.preventDefault(); executeScanWorkflow(); }
+        } else if (appState === 'REVIEW') {
+            if (document.activeElement.tagName === 'INPUT') return;
+            if (e.code === 'Space') { e.preventDefault(); commitReviewSelection(); } 
+            else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); choiceDropdown.focus(); } 
+            else if (e.key === 'd' || e.key === 'D') { e.preventDefault(); setAppState('IDLE'); }
+        } else if (appState === 'PRINT_PROMPT') {
+            if (e.code === 'Space') { e.preventDefault(); executeSingleLabelPrintRouter(); } 
+            else if (e.key === 'c' || e.key === 'C') { e.preventDefault(); setAppState('IDLE'); }
+        }
+    });
+
+    function exportBatchToExcel() {
+        if (scannedBatchRows.length === 0) { alert("No collected warehouse records to export."); return; }
         const formattedData = scannedBatchRows.map(row => ({
-            "Timestamp": row.timestamp,
+            "Timestamp": row.timestamp, 
+            "Qty": row.quantity || "1x",
             "Raw Scanned Label": row.scannedText,
-            "Matched Inventory Item": row.matchedProduct,
+            "Matched Inventory Item": row.matchedProduct, 
             "Assigned Bin Location": row.binLocation
         }));
-
         const worksheet = XLSX.utils.json_to_sheet(formattedData);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Putaway Labels");
         XLSX.writeFile(workbook, "ready_to_print.xlsx");
     }
 
-    // Key Listener
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'Space') {
-            e.preventDefault();
-            executeScanWorkflow();
-        }
-    });
-
-    // Run initialization
-    initializeCamera();
+    bootApplicationEngine();
 </script>
 </body>
 </html>

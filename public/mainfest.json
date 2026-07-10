@@ -1,0 +1,18 @@
+{
+  "short_name": "PutAwayAI",
+  "name": "AI Warehouse Put-Away Terminal",
+  "description": "Offline-first intelligent middleware scanner for warehouse putaway processing.",
+  "start_url": "/",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "display": "standalone",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "https://cdn.jsdelivr.net/npm/@tabler/icons@2.36.0/icons/printer.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}
