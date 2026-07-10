@@ -5,6 +5,8 @@ __pycache__/
 
 # Configuration and Secrets
 config.ini
+*.dev.vars
+.dev.vars
 
 # Local Excel Sheets (keeps heavy warehouse data out of git)
 *.xlsx
