@@ -584,13 +584,22 @@ async function executeScanWorkflow() {
     setAppState('PROCESSING');
 
     try {
-        // 1. Capture Image Frame
+        // 1. Capture Image Frame (guard against uninitialized camera stream)
+        const videoW = videoEl.videoWidth;
+        const videoH = videoEl.videoHeight;
+        if (!videoW || !videoH || videoW <= 0 || videoH <= 0) {
+            alert("Camera stream not ready yet. Wait a moment and try again.");
+            setAppState('IDLE');
+            return;
+        }
+        
         const canvas = document.createElement('canvas');
-        canvas.width = videoEl.videoWidth || 1280; 
-        canvas.height = videoEl.videoHeight || 720;
+        canvas.width = videoW; 
+        canvas.height = videoH;
         canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
         
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        // PNG preserves text edges; JPEG compression destroys OCR-critical detail
+        const dataUrl = canvas.toDataURL('image/png');
         const base64Image = dataUrl.split(',')[1];
 
         snapshotPreview.src = dataUrl;
@@ -608,12 +617,18 @@ async function executeScanWorkflow() {
                 if (!response.ok || !data.text) throw new Error("Cloud pipe broken");
                 activeAiTextRead = data.text;
             } catch (cloudErr) {
-                console.warn("Cloud OCR failed. Activating Tesseract Local backup...");
-                activeAiTextRead = await runLocalTesseractOCR(dataUrl); // FIX: Canvas swapped to dataUrl
+                console.warn("[WORKFLOW] Cloud OCR failed:", cloudErr.message);
+                console.log("[WORKFLOW] Activating Tesseract Local backup...");
+                console.log("[WORKFLOW] Data URL length:", dataUrl.length, "characters");
+                activeAiTextRead = await runLocalTesseractOCR(dataUrl);
+                console.log("[WORKFLOW] Tesseract returned:", JSON.stringify(activeAiTextRead));
             }
         } else {
-            console.log("Device offline. Bypassing cloud, processing with Tesseract.js...");
-            activeAiTextRead = await runLocalTesseractOCR(dataUrl); // FIX: Canvas swapped to dataUrl
+            console.log("[WORKFLOW] Device offline. Falling back to Tesseract.js...");
+            console.log("[WORKFLOW] Data URL length:", dataUrl.length, "characters (first 50):", dataUrl.substring(0, 50));
+            console.log("[WORKFLOW] Canvas dimensions:", videoW, "x", videoH);
+            activeAiTextRead = await runLocalTesseractOCR(dataUrl);
+            console.log("[WORKFLOW] Tesseract returned:", JSON.stringify(activeAiTextRead));
         }
 
         // 3. Extract Quantity and Search Text
@@ -665,24 +680,55 @@ async function executeScanWorkflow() {
     }
 }
 
-    // Local Browser WebAssembly OCR Compilation Engine
-async function runLocalTesseractOCR(imageSource) { 
-    try {
-        const worker = await Tesseract.createWorker('eng', 1, {
-            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
-            corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core.wasm.js',
-            langPath: 'https://tessdata.projectnaptha.com/4.0.0_best'
-        });
+    // --- Persistent Tesseract Worker (singleton — created once, reused forever) ---
+    let cachedTesseractWorker = null;
+
+    async function getTesseractWorker() {
+        if (cachedTesseractWorker) return cachedTesseractWorker;
         
-        // FIX: Pass the newly mapped imageSource parameter
-        const response = await worker.recognize(imageSource); 
-        await worker.terminate(); 
-        return response.data.text ? response.data.text.trim() : "";
-    } catch (err) {
-        console.error("Local WebAssembly OCR engine failed:", err);
-        return "";
+        console.log("[Tesseract] One-time init: downloading 12MB eng language model + loading WASM core...");
+        cachedTesseractWorker = await Tesseract.createWorker('eng', 1, {
+            // Explicitly point to the exact URLs that the Service Worker caches
+            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
+            corePath:  'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core.wasm.js',
+            langPath:  'https://tessdata.projectnaptha.com/4.0.0_best',
+            // Set logger globally — per-call loggers cause DataCloneError in v5
+            logger: (info) => {
+                if (info.status === 'recognizing text') {
+                    console.log(`[Tesseract] Progress: ${Math.round(info.progress * 100)}%`);
+                }
+            }
+        });
+        console.log("[Tesseract] Worker initialized and ready for all future scans.");
+        return cachedTesseractWorker;
     }
-}
+
+    // Local Browser WebAssembly OCR Compilation Engine
+    async function runLocalTesseractOCR(imageSource) { 
+        try {
+            const worker = await getTesseractWorker();
+            console.log("[Tesseract] Beginning recognition pass...");
+            
+            const response = await worker.recognize(imageSource);
+            
+            const extractedText = response.data.text ? response.data.text.trim() : "";
+            
+            console.log(`[Tesseract] Done. Extracted ${extractedText.length} characters.`);
+            if (extractedText.length > 0) {
+                console.log(`[Tesseract] Preview: "${extractedText.substring(0, 120)}${extractedText.length > 120 ? '...' : ''}"`);
+            } else {
+                console.warn("[Tesseract] ⚠️  EMPTY RESULT — likely causes:");
+                console.warn("  1. Image is blurry, dark, or out of focus");
+                console.warn("  2. Text is too small or at a steep angle");
+                console.warn("  3. Camera stream hadn't fully initialized yet (check dimensions below)");
+            }
+            
+            return extractedText;
+        } catch (err) {
+            console.error("[Tesseract] OCR engine threw an exception:", err);
+            return "";
+        }
+    }
 
     function handleDropdownSelectionChange() {
         if (choiceDropdown.value === "CUSTOM") {
