@@ -12,7 +12,7 @@
     
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        #app-container { max-width: 950px; width: 100%; text-align: center; position: relative; }
+        #app-container { max-width: 1050px; width: 100%; text-align: center; position: relative; }
         .window-box { background: #222; border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); text-align: left; }
         .grid-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
         video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; }
@@ -34,7 +34,7 @@
         .state-review { background: #10ac84; color: white; }
         .state-print { background: #9b59b6; color: white; }
 
-        .btn { background: #54a0ff; color: white; border: none; padding: 12px 24px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; margin-right: 5px; }
+        .btn { background: #54a0ff; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; margin-right: 5px; margin-bottom: 5px; }
         .btn:hover { background: #2e86de; }
         .btn-success { background: #10ac84; }
         .btn-success:hover { background: #0f9673; }
@@ -42,6 +42,8 @@
         .btn-secondary:hover { background: #485460; }
         .btn-danger { background: #ee5253; }
         .btn-danger:hover { background: #cf6a17; }
+        .btn-warning { background: #f39c12; }
+        .btn-warning:hover { background: #d68910; }
         
         #review-panel { display: none; margin-top: 10px; padding: 15px; border-radius: 8px; background: #2d2d2d; border: 2px solid #444; }
         #print-prompt-panel { display: none; margin-top: 10px; padding: 20px; border-radius: 8px; background: rgba(155, 89, 182, 0.15); border: 2px dashed #9b59b6; text-align: center; }
@@ -51,8 +53,11 @@
         select:focus, input[type="text"]:focus { border-color: #54a0ff; outline: none; }
         
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #1a1a1a; }
-        th, td { padding: 10px; border: 1px solid #333; text-align: left; }
+        th, td { padding: 10px; border: 1px solid #333; text-align: left; font-size: 14px; }
         th { background: #2d2d2d; color: #54a0ff; }
+        tr.selected-row { outline: 2px solid #ff6b6b; background: rgba(238, 82, 83, 0.15) !important; }
+        tr:hover { background: #252525; cursor: pointer; }
+        
         .instruction-banner { font-size: 15px; background: #2980b9; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; text-align: center; transition: 0.2s; }
 
         #snapshot-preview { width: 100%; border-radius: 6px; border: 1px solid #444; margin-top: 15px; display: none; }
@@ -72,6 +77,22 @@
 </head>
 <body>
 
+<!-- Edit Modal Overlay -->
+<div id="edit-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center;">
+    <div style="background:#222; border:1px solid #444; border-radius:8px; padding:20px; width:450px; max-width:90%;">
+        <h3 style="margin-top:0; color:#54a0ff;">✏️ Edit Match Association</h3>
+        <p style="font-size:13px; color:#bbb; margin-bottom: 15px;">Updating this will fix the manifest list and automatically reteach the AI memory.</p>
+        <label style="font-size:13px; color:#aaa;">Product Name:</label>
+        <input type="text" id="edit-prod-input" style="margin-bottom:15px;">
+        <label style="font-size:13px; color:#aaa;">Bin Location:</label>
+        <input type="text" id="edit-bin-input" style="margin-bottom:20px;">
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+            <button class="btn btn-success" onclick="saveEditModal()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
 <div id="network-status-badge" class="connection-badge status-online">● Checking Network Status</div>
 
 <div id="app-container">
@@ -80,10 +101,11 @@
     <div class="window-box" style="background: #1e272e; border-color: #3d3d3d; margin-bottom: 15px;">
         <strong style="color: #54a0ff; font-size: 15px;">⌨️ Warehouse Terminal Control Hotkeys Quick-Reference:</strong>
         <ul style="margin: 8px 0 0 20px; padding: 0; font-size: 14px; color: #dcdde1; line-height: 1.6; text-align: left;">
-            <li><strong>SPACEBAR:</strong> <span style="color:#2e86de; font-weight:bold;">[Step 1]</span> Trigger Snapshot Scan ➡️ <span style="color:#10ac84; font-weight:bold;">[Step 2]</span> Accept Match Target ➡️ <span style="color:#9b59b6; font-weight:bold;">[Step 3]</span> Fire Single Label Ticket Print</li>
-            <li><strong>M (Modify):</strong> Tap during Match Review to shift focus to candidate selection lists (Use Up/Down Arrows)</li>
-            <li><strong>D (Delete / Clear):</strong> Tap during Match Review to completely cancel the current item scan data container</li>
-            <li><strong>C (Cancel Print):</strong> Tap during Print Prompt selection to skip label ticket compilation and return cleanly to Idle Standby</li>
+            <li><strong>SPACEBAR:</strong> <span style="color:#2e86de; font-weight:bold;">[Step 1]</span> Trigger Scan ➡️ <span style="color:#10ac84; font-weight:bold;">[Step 2]</span> Accept Match ➡️ <span style="color:#9b59b6; font-weight:bold;">[Step 3]</span> Print Label</li>
+            <li><strong>M (Modify):</strong> Tap during Match Review to shift focus to candidate selection lists.</li>
+            <li><strong>D (Discard / Delete):</strong> Tap during Match Review to discard bad scans. Tap during Standby to Delete & Unlearn a selected historical batch row.</li>
+            <li><strong>E (Edit):</strong> Tap during Standby to Edit a selected historical batch row and reteach the system.</li>
+            <li><strong>C (Cancel Print):</strong> Tap during Print Prompt selection to skip label compilation.</li>
         </ul>
     </div>
 
@@ -170,11 +192,15 @@
     <div class="window-box" id="batch-log-box">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
             <h3>Current Processing Batch Run</h3>
-            <div>
-                <button class="btn btn-secondary" onclick="executeBatchPrintRouter()">Print Manifest List</button>
-                <button class="btn" onclick="exportBatchToExcel()">Export Excel (.xlsx)</button>
-                <button class="btn btn-danger" onclick="triggerClearBatchWorkflow()">Clear Batch</button>
+            <div style="text-align:right;">
+                <button class="btn btn-secondary" onclick="executeBatchPrintRouter()">🖨️ Print Manifest List</button>
+                <button class="btn" onclick="exportBatchToExcel('FULL')">📊 Export Full Run (.xlsx)</button>
+                <button class="btn btn-warning" onclick="exportBatchToExcel('DELTA')">🔄 Export Delta Sync (.xlsx)</button>
+                <button class="btn btn-danger" onclick="triggerClearBatchWorkflow()">Clear Batch (Reset)</button>
             </div>
+        </div>
+        <div style="font-size: 12px; color: #aaa; margin-bottom: 10px;">
+            * Click any row to select it, then press <strong>D</strong> to Unlearn & Delete or <strong>E</strong> to Edit.
         </div>
         <table id="batch-table">
             <thead>
@@ -184,6 +210,7 @@
                     <th>Raw Scanned Label</th>
                     <th>Matched Product Name</th>
                     <th>Bin Location</th>
+                    <th>Status</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -218,6 +245,10 @@
     const snapshotPreview = document.getElementById('snapshot-preview');
     const singleLabelPrintCard = document.getElementById('single-label-print-card');
 
+    const editModal = document.getElementById('edit-modal');
+    const editProdInput = document.getElementById('edit-prod-input');
+    const editBinInput = document.getElementById('edit-bin-input');
+
     const sheetWrapper = document.getElementById('sheet-wrapper');
     const sheetSelector = document.getElementById('sheet-selector');
     const mappingPanel = document.getElementById('mapping-panel');
@@ -228,13 +259,18 @@
     let rawSheetMatrix = []; 
     let masterInventoryCache = [];
     let scannedBatchRows = [];
+    let learnedCache = {}; 
     let topMatchCandidates = []; 
+    
     let activeAiTextRead = "";
+    let activeLookUpSearchText = ""; 
     let activeCapturedQty = ""; 
 
     let lastLoggedProduct = "";
     let lastLoggedBin = "";
     let lastLoggedQty = "";
+    
+    let selectedBatchRowIndex = null; 
 
     let htmlLabelTemplateString = `
         <div style="font-family:'Courier New', monospace; text-align:center; padding:30px; border:4px solid #000; border-radius:12px; width:450px; margin:40px auto;">
@@ -245,7 +281,6 @@
         </div>
     `;
 
-    // Progressive Web App Installation Service Worker Hookup
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('/sw.js')
@@ -254,7 +289,6 @@
         });
     }
 
-    // Interactive Real-time Network Monitoring Handlers
     function updateNetworkStatusIndicator() {
         if (navigator.onLine) {
             networkStatusBadge.textContent = "● ONLINE (Cloud Gemini OCR)";
@@ -297,6 +331,7 @@
         const cachedMaster = localStorage.getItem('yeti_master_cache');
         const cachedBatch = localStorage.getItem('yeti_scanned_batch');
         const cachedTemplate = localStorage.getItem('yeti_custom_html_template');
+        const cachedLearned = localStorage.getItem('yeti_learned_cache');
 
         if (cachedMaster) {
             masterInventoryCache = JSON.parse(cachedMaster);
@@ -307,6 +342,9 @@
         if (cachedBatch) {
             scannedBatchRows = JSON.parse(cachedBatch);
             renderTableDOM();
+        }
+        if (cachedLearned) {
+            learnedCache = JSON.parse(cachedLearned);
         }
         if (cachedTemplate) {
             htmlLabelTemplateString = cachedTemplate;
@@ -342,6 +380,8 @@
             snapshotPreview.style.display = "none";
             snapshotPreview.src = ""; 
             choiceDropdown.innerHTML = "";
+            selectedBatchRowIndex = null; 
+            renderTableDOM(); 
         } else if (newState === 'PROCESSING') {
             cameraStatusEl.textContent = "AI Reading...";
             cameraStatusEl.className = "status-badge state-loading";
@@ -350,7 +390,7 @@
         } else if (newState === 'REVIEW') {
             cameraStatusEl.textContent = "Review Stage";
             cameraStatusEl.className = "status-badge state-review";
-            workflowGuideEl.innerHTML = "Press <strong>SPACEBAR</strong> to Accept match entry | Press <strong>M</strong> to Modify selection list | Press <strong>D</strong> to Cancel/Delete scan";
+            workflowGuideEl.innerHTML = "Press <strong>SPACEBAR</strong> to Accept match entry | Press <strong>M</strong> to Modify | Press <strong>D</strong> to Discard scan";
             workflowGuideEl.style.background = "#10ac84";
             idlePrompt.style.display = "none";
             printPromptPanel.style.display = "none";
@@ -358,7 +398,7 @@
         } else if (newState === 'PRINT_PROMPT') {
             cameraStatusEl.textContent = "Print Query";
             cameraStatusEl.className = "status-badge state-print";
-            workflowGuideEl.innerHTML = "🖨️ Print Prompt: Press <strong>SPACEBAR</strong> to Print Current Box Ticket | Press <strong>C</strong> to Skip and clear camera";
+            workflowGuideEl.innerHTML = "🖨️ Print Prompt: Press <strong>SPACEBAR</strong> to Print Current Box Ticket | Press <strong>C</strong> to Skip";
             workflowGuideEl.style.background = "#9b59b6";
             idlePrompt.style.display = "none";
             reviewPanel.style.display = "none";
@@ -452,8 +492,6 @@
         dbStatusEl.style.color = "#10ac84";
         if (requirementWarning) requirementWarning.style.display = "none";
     }
-
-    // --- STRATEGIC FUZZY LOGIC ENGINES ---
 
     function calculateWordDiceRatio(sToken, mToken) {
         const getBigrams = (str) => {
@@ -573,8 +611,6 @@
         return Math.max(0, finalScore);
     }
 
- // --- BULLETPROOF SCANNING WORKFLOW PIPELINE ---
-
 async function executeScanWorkflow() {
     if (masterInventoryCache.length === 0) { 
         alert("Load inventory metrics data file registers first."); 
@@ -584,7 +620,6 @@ async function executeScanWorkflow() {
     setAppState('PROCESSING');
 
     try {
-        // 1. Capture Image Frame (guard against uninitialized camera stream)
         const videoW = videoEl.videoWidth;
         const videoH = videoEl.videoHeight;
         if (!videoW || !videoH || videoW <= 0 || videoH <= 0) {
@@ -598,14 +633,12 @@ async function executeScanWorkflow() {
         canvas.height = videoH;
         canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
         
-        // PNG preserves text edges; JPEG compression destroys OCR-critical detail
         const dataUrl = canvas.toDataURL('image/png');
         const base64Image = dataUrl.split(',')[1];
 
         snapshotPreview.src = dataUrl;
         snapshotPreview.style.display = "block";
 
-        // 2. Execute OCR (Cloud primary, Local fallback via Data URL)
         if (navigator.onLine) {
             try {
                 const response = await fetch('/api/extract', {
@@ -617,60 +650,67 @@ async function executeScanWorkflow() {
                 if (!response.ok || !data.text) throw new Error("Cloud pipe broken");
                 activeAiTextRead = data.text;
             } catch (cloudErr) {
-                console.warn("[WORKFLOW] Cloud OCR failed:", cloudErr.message);
-                console.log("[WORKFLOW] Activating Tesseract Local backup...");
-                console.log("[WORKFLOW] Data URL length:", dataUrl.length, "characters");
                 activeAiTextRead = await runLocalTesseractOCR(dataUrl);
-                console.log("[WORKFLOW] Tesseract returned:", JSON.stringify(activeAiTextRead));
             }
         } else {
-            console.log("[WORKFLOW] Device offline. Falling back to Tesseract.js...");
-            console.log("[WORKFLOW] Data URL length:", dataUrl.length, "characters (first 50):", dataUrl.substring(0, 50));
-            console.log("[WORKFLOW] Canvas dimensions:", videoW, "x", videoH);
             activeAiTextRead = await runLocalTesseractOCR(dataUrl);
-            console.log("[WORKFLOW] Tesseract returned:", JSON.stringify(activeAiTextRead));
         }
 
-        // 3. Extract Quantity and Search Text
         activeCapturedQty = appConfig.output_formatting.fallback_quantity_if_missing || "1x";
-        let lookUpSearchText = activeAiTextRead;
+        activeLookUpSearchText = activeAiTextRead;
 
         if (appConfig.extraction_rules?.use_line_anchor) {
             const anchorMatch = activeAiTextRead.match(new RegExp(appConfig.extraction_rules.anchor_capture_pattern, "i"));
             if (anchorMatch) {
                 activeCapturedQty = anchorMatch[1]; 
                 if (appConfig.extraction_rules.isolate_search_text) {
-                    lookUpSearchText = activeAiTextRead.substring(anchorMatch[0].length).trim();
+                    activeLookUpSearchText = activeAiTextRead.substring(anchorMatch[0].length).trim();
                 }
             }
         }
 
-        // 4. Score and Sort Candidates
-        const scoredList = masterInventoryCache
-            .map(item => ({ item, score: advancedWarehouseFuzzyMatch(lookUpSearchText, item.description) }))
-            .sort((a, b) => b.score - a.score);
+        let existingLearnedMatch = learnedCache[activeLookUpSearchText];
 
-        topMatchCandidates = scoredList.slice(0, appConfig.system_dials.max_dropdown_candidates);
-        const highestScore = topMatchCandidates[0]?.score || 0;
-
-        // 5. Build UI Dropdown Options
-        choiceDropdown.innerHTML = topMatchCandidates.map((cand, idx) => 
-            `<option value="${idx}">[Score: ${cand.score.toFixed(0)}%] ${cand.item.description} -> Bin: ${cand.item.location}</option>`
-        ).join('') + `<option value="CUSTOM">➕ Create Completely New Entry Override...</option>`;
-
-        // 6. Assess Match Confidence and Update Warnings
-        const gatekeeperFloor = appConfig.system_dials.gatekeeper_warning_threshold;
-        const competingCount = scoredList.filter(x => (highestScore - x.score) <= 1.0 && x.score >= gatekeeperFloor).length;
-
-        if (highestScore >= gatekeeperFloor) {
+        if (existingLearnedMatch) {
+            topMatchCandidates = [{
+                item: existingLearnedMatch,
+                score: 100,
+                isLearned: true
+            }];
+            
             reviewPanel.classList.remove('gatekeeper-warning');
-            matchHeaderEl.innerHTML = competingCount > 1 
-                ? `⚠️ Multiple choices found at <span style="color:#f1c40f;">${highestScore.toFixed(0)}%</span> confidence! Verify dropdown.`
-                : `🎯 One distinct match found at <span style="color:#10ac84;">${highestScore.toFixed(0)}%</span> confidence.`;
+            matchHeaderEl.innerHTML = `🎯 Perfect memory recall found. Please verify.`;
         } else {
-            reviewPanel.classList.add('gatekeeper-warning');
-            matchHeaderEl.innerHTML = `⚠️ Mismatch Alert! Read: <span style="color:#ee5253;">"${activeAiTextRead}"</span> (Unrelated?)`;
+            const scoredList = masterInventoryCache
+                .map(item => ({ item, score: advancedWarehouseFuzzyMatch(activeLookUpSearchText, item.description), isLearned: false }))
+                .sort((a, b) => b.score - a.score);
+
+            // Cap perfect matches at 99% if there is more than one 100% option
+            const perfectMatches = scoredList.filter(x => x.score >= 100);
+            if (perfectMatches.length > 1) {
+                perfectMatches.forEach(x => x.score = 99.0);
+            }
+
+            topMatchCandidates = scoredList.slice(0, appConfig.system_dials.max_dropdown_candidates);
+            const highestScore = topMatchCandidates[0]?.score || 0;
+            const gatekeeperFloor = appConfig.system_dials.gatekeeper_warning_threshold;
+            const competingCount = scoredList.filter(x => (highestScore - x.score) <= 1.0 && x.score >= gatekeeperFloor).length;
+
+            if (highestScore >= gatekeeperFloor) {
+                reviewPanel.classList.remove('gatekeeper-warning');
+                matchHeaderEl.innerHTML = competingCount > 1 
+                    ? `⚠️ Multiple choices found at <span style="color:#f1c40f;">${highestScore.toFixed(0)}%</span> confidence! Verify dropdown.`
+                    : `🎯 One distinct match found at <span style="color:#10ac84;">${highestScore.toFixed(0)}%</span> confidence.`;
+            } else {
+                reviewPanel.classList.add('gatekeeper-warning');
+                matchHeaderEl.innerHTML = `⚠️ Mismatch Alert! Read: <span style="color:#ee5253;">"${activeAiTextRead}"</span> (Unrelated?)`;
+            }
         }
+
+        // Removed LEARNED tagging for operator display - Just outputting the Score %
+        choiceDropdown.innerHTML = topMatchCandidates.map((cand, idx) => {
+            return `<option value="${idx}">[Score: ${cand.score.toFixed(0)}%] ${cand.item.description} -> Bin: ${cand.item.location}</option>`;
+        }).join('') + `<option value="CUSTOM">➕ Create Completely New Entry Override...</option>`;
 
         setAppState('REVIEW');
 
@@ -680,50 +720,22 @@ async function executeScanWorkflow() {
     }
 }
 
-    // --- Persistent Tesseract Worker (singleton — created once, reused forever) ---
     let cachedTesseractWorker = null;
-
     async function getTesseractWorker() {
         if (cachedTesseractWorker) return cachedTesseractWorker;
-        
-        console.log("[Tesseract] One-time init: downloading 12MB eng language model + loading WASM core...");
         cachedTesseractWorker = await Tesseract.createWorker('eng', 1, {
-            // Explicitly point to the exact URLs that the Service Worker caches
             workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
             corePath:  'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core.wasm.js',
-            langPath:  'https://tessdata.projectnaptha.com/4.0.0_best',
-            // Set logger globally — per-call loggers cause DataCloneError in v5
-            logger: (info) => {
-                if (info.status === 'recognizing text') {
-                    console.log(`[Tesseract] Progress: ${Math.round(info.progress * 100)}%`);
-                }
-            }
+            langPath:  'https://tessdata.projectnaptha.com/4.0.0_best'
         });
-        console.log("[Tesseract] Worker initialized and ready for all future scans.");
         return cachedTesseractWorker;
     }
 
-    // Local Browser WebAssembly OCR Compilation Engine
     async function runLocalTesseractOCR(imageSource) { 
         try {
             const worker = await getTesseractWorker();
-            console.log("[Tesseract] Beginning recognition pass...");
-            
             const response = await worker.recognize(imageSource);
-            
-            const extractedText = response.data.text ? response.data.text.trim() : "";
-            
-            console.log(`[Tesseract] Done. Extracted ${extractedText.length} characters.`);
-            if (extractedText.length > 0) {
-                console.log(`[Tesseract] Preview: "${extractedText.substring(0, 120)}${extractedText.length > 120 ? '...' : ''}"`);
-            } else {
-                console.warn("[Tesseract] ⚠️  EMPTY RESULT — likely causes:");
-                console.warn("  1. Image is blurry, dark, or out of focus");
-                console.warn("  2. Text is too small or at a steep angle");
-                console.warn("  3. Camera stream hadn't fully initialized yet (check dimensions below)");
-            }
-            
-            return extractedText;
+            return response.data.text ? response.data.text.trim() : "";
         } catch (err) {
             console.error("[Tesseract] OCR engine threw an exception:", err);
             return "";
@@ -742,7 +754,9 @@ async function executeScanWorkflow() {
     }
 
     function commitReviewSelection() {
-        let finalProductDescription = ""; let finalBinLocation = "";
+        let finalProductDescription = ""; 
+        let finalBinLocation = "";
+        let finalOriginType = "STANDARD";
 
         if (choiceDropdown.value === "CUSTOM") {
             finalProductDescription = manualProdInput.value.trim();
@@ -750,11 +764,26 @@ async function executeScanWorkflow() {
             if (!finalProductDescription || !finalBinLocation) {
                 alert("Complete manual override fields prior to data commits."); return;
             }
+            finalOriginType = learnedCache[activeLookUpSearchText] ? "MATCHED" : "NEW";
         } else {
             const chosenCandidate = topMatchCandidates[parseInt(choiceDropdown.value)];
             finalProductDescription = chosenCandidate.item.description;
             finalBinLocation = chosenCandidate.item.location;
+
+            if (chosenCandidate.isLearned) {
+                finalOriginType = "MATCHED";
+            } else if (chosenCandidate.score >= 100) {
+                finalOriginType = "STANDARD";
+            } else {
+                finalOriginType = learnedCache[activeLookUpSearchText] ? "MATCHED" : "NEW";
+            }
         }
+
+        learnedCache[activeLookUpSearchText] = { 
+            description: finalProductDescription, 
+            location: finalBinLocation 
+        };
+        localStorage.setItem('yeti_learned_cache', JSON.stringify(learnedCache));
 
         lastLoggedProduct = finalProductDescription;
         lastLoggedBin = finalBinLocation;
@@ -764,8 +793,10 @@ async function executeScanWorkflow() {
             timestamp: new Date().toLocaleTimeString(),
             quantity: activeCapturedQty,
             scannedText: activeAiTextRead,
+            rawLookupText: activeLookUpSearchText, 
             matchedProduct: finalProductDescription,
-            binLocation: finalBinLocation
+            binLocation: finalBinLocation,
+            origin: finalOriginType
         };
         scannedBatchRows.push(newRow);
         
@@ -804,48 +835,183 @@ async function executeScanWorkflow() {
         for (let i = scannedBatchRows.length - 1; i >= 0; i--) {
             const row = scannedBatchRows[i];
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${row.timestamp}</td><td style="font-weight:bold; color:#f1c40f;">${row.quantity || "1x"}</td><td>${row.scannedText}</td><td>${row.matchedProduct}</td><td style="font-weight:bold; color:#54a0ff;">${row.binLocation}</td>`;
+            if (selectedBatchRowIndex === i) {
+                tr.classList.add('selected-row');
+            }
+            
+            tr.onclick = () => {
+                if (selectedBatchRowIndex === i) {
+                    selectedBatchRowIndex = null; 
+                } else {
+                    selectedBatchRowIndex = i;
+                }
+                renderTableDOM(); 
+            };
+
+            let originBadge = "";
+            if (row.origin === 'NEW') {
+                originBadge = `<span style="background: #10ac84; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold;">NEW</span>`;
+            } else if (row.origin === 'MATCHED') {
+                originBadge = `<span style="background: #f39c12; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold;">MATCHED</span>`;
+            } else {
+                originBadge = `<span style="color: #888;">-</span>`;
+            }
+
+            tr.innerHTML = `
+                <td>${row.timestamp}</td>
+                <td style="font-weight:bold; color:#f1c40f;">${row.quantity || "1x"}</td>
+                <td>${row.scannedText}</td>
+                <td>${row.matchedProduct}</td>
+                <td style="font-weight:bold; color:#54a0ff;">${row.binLocation}</td>
+                <td style="font-size: 11px; text-align: center;">${originBadge}</td>
+            `;
             batchTableBody.appendChild(tr);
         }
     }
 
+    function deleteHistoricalBatchRow(index) {
+        if (index === null || !scannedBatchRows[index]) return;
+        
+        const rowData = scannedBatchRows[index];
+        const confirmationText = `Are you sure you want to DELETE this entry?\n\nProduct: ${rowData.matchedProduct}\n\nThis will also remove it from the local AI memory.`;
+        
+        if (confirm(confirmationText)) {
+            if (learnedCache[rowData.rawLookupText]) {
+                delete learnedCache[rowData.rawLookupText];
+                localStorage.setItem('yeti_learned_cache', JSON.stringify(learnedCache));
+            }
+            
+            scannedBatchRows.splice(index, 1);
+            localStorage.setItem('yeti_scanned_batch', JSON.stringify(scannedBatchRows));
+            
+            selectedBatchRowIndex = null;
+            renderTableDOM();
+        }
+    }
+    
+    function openEditModal() {
+        if (selectedBatchRowIndex === null || !scannedBatchRows[selectedBatchRowIndex]) return;
+        const rowData = scannedBatchRows[selectedBatchRowIndex];
+        editProdInput.value = rowData.matchedProduct;
+        editBinInput.value = rowData.binLocation;
+        editModal.style.display = "flex";
+        editProdInput.focus();
+    }
+
+    function closeEditModal() {
+        editModal.style.display = "none";
+    }
+
+    function saveEditModal() {
+        const newProd = editProdInput.value.trim();
+        const newBin = editBinInput.value.trim();
+        
+        if (!newProd || !newBin) {
+            alert("Fields cannot be empty.");
+            return;
+        }
+
+        const rowData = scannedBatchRows[selectedBatchRowIndex];
+        
+        // Update the AI memory
+        learnedCache[rowData.rawLookupText] = { 
+            description: newProd, 
+            location: newBin 
+        };
+        localStorage.setItem('yeti_learned_cache', JSON.stringify(learnedCache));
+        
+        // Update the table row and force it to NEW status for the Delta export
+        scannedBatchRows[selectedBatchRowIndex].matchedProduct = newProd;
+        scannedBatchRows[selectedBatchRowIndex].binLocation = newBin;
+        scannedBatchRows[selectedBatchRowIndex].origin = 'NEW';
+        
+        localStorage.setItem('yeti_scanned_batch', JSON.stringify(scannedBatchRows));
+        
+        closeEditModal();
+        selectedBatchRowIndex = null;
+        renderTableDOM();
+    }
+
     function triggerClearBatchWorkflow() {
-        const verification = confirm("WARNING: You are about to completely clear the active batch table data. Are you sure you want to proceed?");
+        const verification = confirm("WARNING: FACTORY RESET!\n\nThis will completely clear your current printable list AND completely erase all 'learned' memory from this session.\n\nAre you sure you want to proceed?");
         if (verification) {
             scannedBatchRows = [];
             localStorage.removeItem('yeti_scanned_batch');
+            learnedCache = {};
+            localStorage.removeItem('yeti_learned_cache');
+            selectedBatchRowIndex = null;
             renderTableDOM();
             setAppState('IDLE');
         }
     }
 
     window.addEventListener('keydown', (e) => {
-        if (appState === 'IDLE') {
-            if (e.code === 'Space') { e.preventDefault(); executeScanWorkflow(); }
+        if (appState === 'IDLE' && editModal.style.display === "none") {
+            if (e.code === 'Space') { 
+                e.preventDefault(); 
+                executeScanWorkflow(); 
+            } else if (e.key === 'd' || e.key === 'D') {
+                if (selectedBatchRowIndex !== null) {
+                    e.preventDefault();
+                    deleteHistoricalBatchRow(selectedBatchRowIndex);
+                }
+            } else if (e.key === 'e' || e.key === 'E') {
+                if (selectedBatchRowIndex !== null) {
+                    e.preventDefault();
+                    openEditModal();
+                }
+            }
+        } else if (editModal.style.display === "flex") {
+            // Let the modal handle inputs naturally
         } else if (appState === 'REVIEW') {
             if (document.activeElement.tagName === 'INPUT') return;
-            if (e.code === 'Space') { e.preventDefault(); commitReviewSelection(); } 
-            else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); choiceDropdown.focus(); } 
-            else if (e.key === 'd' || e.key === 'D') { e.preventDefault(); setAppState('IDLE'); }
+            
+            if (e.code === 'Space') { 
+                e.preventDefault(); commitReviewSelection(); 
+            } else if (e.key === 'm' || e.key === 'M') { 
+                e.preventDefault(); choiceDropdown.focus(); 
+            } else if (e.key === 'd' || e.key === 'D') { 
+                e.preventDefault(); setAppState('IDLE'); 
+            }
         } else if (appState === 'PRINT_PROMPT') {
-            if (e.code === 'Space') { e.preventDefault(); executeSingleLabelPrintRouter(); } 
-            else if (e.key === 'c' || e.key === 'C') { e.preventDefault(); setAppState('IDLE'); }
+            if (e.code === 'Space') { 
+                e.preventDefault(); executeSingleLabelPrintRouter(); 
+            } else if (e.key === 'c' || e.key === 'C') { 
+                e.preventDefault(); setAppState('IDLE'); 
+            }
         }
     });
 
-    function exportBatchToExcel() {
+    function exportBatchToExcel(mode) {
         if (scannedBatchRows.length === 0) { alert("No collected warehouse records to export."); return; }
-        const formattedData = scannedBatchRows.map(row => ({
+        
+        let targetRows = scannedBatchRows;
+        let filename = "manifest_full_run.xlsx";
+        let sheetName = "All Putaway Labels";
+
+        if (mode === 'DELTA') {
+            targetRows = scannedBatchRows.filter(row => row.origin === 'NEW');
+            filename = "manifest_delta_sync.xlsx";
+            sheetName = "New Associations";
+            if (targetRows.length === 0) {
+                alert("No new associations in this batch to sync.");
+                return;
+            }
+        }
+
+        const formattedData = targetRows.map(row => ({
             "Timestamp": row.timestamp, 
             "Qty": row.quantity || "1x",
             "Raw Scanned Label": row.scannedText,
             "Matched Inventory Item": row.matchedProduct, 
-            "Assigned Bin Location": row.binLocation
+            "Assigned Bin Location": row.binLocation,
+            "Match Status": row.origin
         }));
+
         const worksheet = XLSX.utils.json_to_sheet(formattedData);
         const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Putaway Labels");
-        XLSX.writeFile(workbook, "ready_to_print.xlsx");
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+        XLSX.writeFile(workbook, filename);
     }
 
     bootApplicationEngine();
