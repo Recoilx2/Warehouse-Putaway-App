@@ -573,121 +573,116 @@
         return Math.max(0, finalScore);
     }
 
-    // --- BULLETPROOF SCANNING WORKFLOW PIPELINE ---
+ // --- BULLETPROOF SCANNING WORKFLOW PIPELINE ---
 
-    async function executeScanWorkflow() {
-        if (masterInventoryCache.length === 0) { alert("Load inventory metrics data file registers first."); return; }
-        setAppState('PROCESSING');
-
-        try {
-            const canvas = document.createElement('canvas');
-            canvas.width = videoEl.videoWidth || 1280; canvas.height = videoEl.videoHeight || 720;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-            
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-            const base64Image = dataUrl.split(',')[1];
-
-            snapshotPreview.src = dataUrl;
-            snapshotPreview.style.display = "block";
-
-            // Conditional Fallback Layer: Check routing path viability
-            if (navigator.onLine) {
-                try {
-                    const response = await fetch('/api/extract', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ image_base64: base64Image })
-                    });
-                    const data = await response.json();
-                    if (!response.ok || !data.text) throw new Error("Cloud pipe broken");
-                    activeAiTextRead = data.text;
-                } catch (cloudErr) {
-                    console.warn("Cloud OCR timed out or failed. Activating Tesseract Local backup...");
-                    activeAiTextRead = await runLocalTesseractOCR(canvas);
-                }
-            } else {
-                console.log("Device is offline. Bypassing cloud, processing with Tesseract.js...");
-                activeAiTextRead = await runLocalTesseractOCR(canvas);
-            }
-
-            // Clean string payload outputs
-            activeCapturedQty = appConfig.output_formatting.fallback_quantity_if_missing || "1x";
-            let lookUpSearchText = activeAiTextRead;
-
-            if (appConfig.extraction_rules && appConfig.extraction_rules.use_line_anchor) {
-                const anchorRegex = new RegExp(appConfig.extraction_rules.anchor_capture_pattern, "i");
-                const anchorMatch = activeAiTextRead.match(anchorRegex);
-                
-                if (anchorMatch) {
-                    activeCapturedQty = anchorMatch[1]; 
-                    if (appConfig.extraction_rules.isolate_search_text) {
-                        lookUpSearchText = activeAiTextRead.substring(anchorMatch[0].length).trim();
-                    }
-                }
-            }
-
-            const scoredList = masterInventoryCache.map(item => ({
-                item: item, score: advancedWarehouseFuzzyMatch(lookUpSearchText, item.description)
-            }));
-            scoredList.sort((a, b) => b.score - a.score);
-
-            const sliceLimit = appConfig.system_dials.max_dropdown_candidates;
-            topMatchCandidates = scoredList.slice(0, sliceLimit);
-            const highestScore = topMatchCandidates[0] ? topMatchCandidates[0].score : 0;
-
-            const targetClosenessLimit = 1.0;
-            const gatekeeperFloor = appConfig.system_dials.gatekeeper_warning_threshold;
-            const competingClusteredCount = scoredList.filter(x => (highestScore - x.score) <= targetClosenessLimit && x.score >= gatekeeperFloor).length;
-
-            choiceDropdown.innerHTML = "";
-            topMatchCandidates.forEach((cand, idx) => {
-                const opt = document.createElement('option'); opt.value = idx;
-                opt.textContent = `[Score: ${cand.score.toFixed(0)}%] ${cand.item.description} -> Bin: ${cand.item.location}`;
-                choiceDropdown.appendChild(opt);
-            });
-
-            const customOpt = document.createElement('option'); customOpt.value = "CUSTOM";
-            customOpt.textContent = "➕ Create Completely New Entry Override...";
-            choiceDropdown.appendChild(customOpt);
-
-            if (highestScore >= gatekeeperFloor) {
-                reviewPanel.classList.remove('gatekeeper-warning');
-                if (competingClusteredCount > 1) {
-                    matchHeaderEl.innerHTML = `⚠️ Multiple choices found at <span style="color:#f1c40f;">${highestScore.toFixed(0)}%</span> confidence! Verify dropdown.`;
-                } else {
-                    matchHeaderEl.innerHTML = `🎯 One distinct match found at <span style="color:#10ac84;">${highestScore.toFixed(0)}%</span> confidence.`;
-                }
-            } else {
-                reviewPanel.classList.add('gatekeeper-warning');
-                matchHeaderEl.innerHTML = `⚠️ Mismatch Alert! Read: <span style="color:#ee5253;">"${activeAiTextRead}"</span> (Unrelated?)`;
-            }
-
-            setAppState('REVIEW');
-        } catch (err) {
-            alert(`Scanning pipeline system exception: ${err.message}`);
-            setAppState('IDLE');
-        }
+async function executeScanWorkflow() {
+    if (masterInventoryCache.length === 0) { 
+        alert("Load inventory metrics data file registers first."); 
+        return; 
     }
+    
+    setAppState('PROCESSING');
+
+    try {
+        // 1. Capture Image Frame
+        const canvas = document.createElement('canvas');
+        canvas.width = videoEl.videoWidth || 1280; 
+        canvas.height = videoEl.videoHeight || 720;
+        canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const base64Image = dataUrl.split(',')[1];
+
+        snapshotPreview.src = dataUrl;
+        snapshotPreview.style.display = "block";
+
+        // 2. Execute OCR (Cloud primary, Local fallback via Data URL)
+        if (navigator.onLine) {
+            try {
+                const response = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_base64: base64Image })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.text) throw new Error("Cloud pipe broken");
+                activeAiTextRead = data.text;
+            } catch (cloudErr) {
+                console.warn("Cloud OCR failed. Activating Tesseract Local backup...");
+                activeAiTextRead = await runLocalTesseractOCR(dataUrl); // FIX: Canvas swapped to dataUrl
+            }
+        } else {
+            console.log("Device offline. Bypassing cloud, processing with Tesseract.js...");
+            activeAiTextRead = await runLocalTesseractOCR(dataUrl); // FIX: Canvas swapped to dataUrl
+        }
+
+        // 3. Extract Quantity and Search Text
+        activeCapturedQty = appConfig.output_formatting.fallback_quantity_if_missing || "1x";
+        let lookUpSearchText = activeAiTextRead;
+
+        if (appConfig.extraction_rules?.use_line_anchor) {
+            const anchorMatch = activeAiTextRead.match(new RegExp(appConfig.extraction_rules.anchor_capture_pattern, "i"));
+            if (anchorMatch) {
+                activeCapturedQty = anchorMatch[1]; 
+                if (appConfig.extraction_rules.isolate_search_text) {
+                    lookUpSearchText = activeAiTextRead.substring(anchorMatch[0].length).trim();
+                }
+            }
+        }
+
+        // 4. Score and Sort Candidates
+        const scoredList = masterInventoryCache
+            .map(item => ({ item, score: advancedWarehouseFuzzyMatch(lookUpSearchText, item.description) }))
+            .sort((a, b) => b.score - a.score);
+
+        topMatchCandidates = scoredList.slice(0, appConfig.system_dials.max_dropdown_candidates);
+        const highestScore = topMatchCandidates[0]?.score || 0;
+
+        // 5. Build UI Dropdown Options
+        choiceDropdown.innerHTML = topMatchCandidates.map((cand, idx) => 
+            `<option value="${idx}">[Score: ${cand.score.toFixed(0)}%] ${cand.item.description} -> Bin: ${cand.item.location}</option>`
+        ).join('') + `<option value="CUSTOM">➕ Create Completely New Entry Override...</option>`;
+
+        // 6. Assess Match Confidence and Update Warnings
+        const gatekeeperFloor = appConfig.system_dials.gatekeeper_warning_threshold;
+        const competingCount = scoredList.filter(x => (highestScore - x.score) <= 1.0 && x.score >= gatekeeperFloor).length;
+
+        if (highestScore >= gatekeeperFloor) {
+            reviewPanel.classList.remove('gatekeeper-warning');
+            matchHeaderEl.innerHTML = competingCount > 1 
+                ? `⚠️ Multiple choices found at <span style="color:#f1c40f;">${highestScore.toFixed(0)}%</span> confidence! Verify dropdown.`
+                : `🎯 One distinct match found at <span style="color:#10ac84;">${highestScore.toFixed(0)}%</span> confidence.`;
+        } else {
+            reviewPanel.classList.add('gatekeeper-warning');
+            matchHeaderEl.innerHTML = `⚠️ Mismatch Alert! Read: <span style="color:#ee5253;">"${activeAiTextRead}"</span> (Unrelated?)`;
+        }
+
+        setAppState('REVIEW');
+
+    } catch (err) {
+        alert(`Scanning pipeline system exception: ${err.message}`);
+        setAppState('IDLE');
+    }
+}
 
     // Local Browser WebAssembly OCR Compilation Engine
-    async function runLocalTesseractOCR(canvasDomElement) {
-        try {
-            // Force the worker thread to utilize our explicit pre-cached CDN endpoints
-            const worker = await Tesseract.createWorker('eng', 1, {
-                workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
-                corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core.wasm.js',
-                langPath: 'https://tessdata.projectnaptha.com/4.0.0_best'
-            });
-            
-            const response = await worker.recognize(canvasDomElement);
-            await worker.terminate(); // Free up terminal thread memory immediately on the tablet/computer
-            return response.data.text ? response.data.text.trim() : "";
-        } catch (err) {
-            console.error("Local WebAssembly OCR engine failed:", err);
-            return "";
-        }
+async function runLocalTesseractOCR(imageSource) { 
+    try {
+        const worker = await Tesseract.createWorker('eng', 1, {
+            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
+            corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core.wasm.js',
+            langPath: 'https://tessdata.projectnaptha.com/4.0.0_best'
+        });
+        
+        // FIX: Pass the newly mapped imageSource parameter
+        const response = await worker.recognize(imageSource); 
+        await worker.terminate(); 
+        return response.data.text ? response.data.text.trim() : "";
+    } catch (err) {
+        console.error("Local WebAssembly OCR engine failed:", err);
+        return "";
     }
+}
 
     function handleDropdownSelectionChange() {
         if (choiceDropdown.value === "CUSTOM") {
