@@ -2,7 +2,8 @@
   "system_dials": {
     "auto_accept_threshold": 85.0,
     "gatekeeper_warning_threshold": 45.0,
-    "max_dropdown_candidates": 5
+    "max_dropdown_candidates": 5,
+    "disable_local_tesseract_fallback": true
   },
   "algorithmic_weights": {
     "use_hybrid_engine": true,
@@ -17,7 +18,14 @@
   },
   "domain_modifiers": {
     "strip_hyphens_before_match": true,
-    "ignore_leading_zeros_on_numbers": true
+    "ignore_leading_zeros_on_numbers": true,
+    "custom_aliases": {
+      "nvy": "navy",
+      "blk": "black",
+      "pk": "pack",
+      "bttry": "battery",
+      "bx": "box"
+    }
   },
   "noise_filters": {
     "global_stopwords": ["intl", "ms", "box", "handling", "quantity", "one", "of", "qty", "count"],

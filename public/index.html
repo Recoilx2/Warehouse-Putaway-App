@@ -290,11 +290,16 @@
     }
 
     function updateNetworkStatusIndicator() {
+        const tesseractDisabled = appConfig?.system_dials?.disable_local_tesseract_fallback === true;
         if (navigator.onLine) {
-            networkStatusBadge.textContent = "● ONLINE (Cloud Gemini OCR)";
+            networkStatusBadge.textContent = "● ONLINE";
             networkStatusBadge.className = "connection-badge status-online";
         } else {
-            networkStatusBadge.textContent = "● OFFLINE (Local Tesseract Backup)";
+            if (tesseractDisabled) {
+                networkStatusBadge.textContent = "● OFFLINE (No OCR Available)";
+            } else {
+                networkStatusBadge.textContent = "● OFFLINE (Local OCR Backup)";
+            }
             networkStatusBadge.className = "connection-badge status-offline";
         }
     }
@@ -311,10 +316,10 @@
         } catch (err) {
             console.error("Configuration payload missing. Initializing fallback rules:", err);
             appConfig = {
-                "system_dials": { "auto_accept_threshold": 85.0, "gatekeeper_warning_threshold": 45.0, "max_dropdown_candidates": 5 },
+                "system_dials": { "auto_accept_threshold": 85.0, "gatekeeper_warning_threshold": 45.0, "max_dropdown_candidates": 5, "disable_local_tesseract_fallback": false },
                 "algorithmic_weights": { "use_hybrid_engine": true, "levenshtein_weight": 0.4, "sorensen_dice_weight": 0.6 },
                 "token_typing_rules": { "numeric_strictness": 1.0, "alphabetic_strictness": 0.6, "alphanumeric_strictness": 0.9, "missing_numeric_penalty_multiplier": 2.5 },
-                "domain_modifiers": { "strip_hyphens_before_match": true, "ignore_leading_zeros_on_numbers": true },
+                "domain_modifiers": { "strip_hyphens_before_match": true, "ignore_leading_zeros_on_numbers": true, "custom_aliases": {} },
                 "extraction_rules": { "use_line_anchor": true, "anchor_capture_pattern": "^([0-9]+x)-", "isolate_search_text": true },
                 "output_formatting": { "include_extracted_quantity": true, "fallback_quantity_if_missing": "1x" },
                 "noise_filters": { "global_stopwords": ["intl", "ms", "box", "handling", "quantity", "one", "of", "qty", "count"], "ignore_single_characters": true, "always_strip_characters": "[^a-zA-Z0-9 ]" }
@@ -532,6 +537,16 @@
         if (appConfig.domain_modifiers.strip_hyphens_before_match) {
             s = s.replace(/-/g, ' '); 
         }
+
+        // Apply custom aliases (word-boundary replacement)
+        const aliases = appConfig.domain_modifiers?.custom_aliases;
+        if (aliases) {
+            for (const [alias, replacement] of Object.entries(aliases)) {
+                const aliasRegex = new RegExp('\\b' + alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+                s = s.replace(aliasRegex, replacement);
+            }
+        }
+
         const cleanCharRegex = new RegExp(appConfig.noise_filters.always_strip_characters, "g");
         s = s.replace(cleanCharRegex, '');
 
@@ -639,6 +654,7 @@ async function executeScanWorkflow() {
         snapshotPreview.src = dataUrl;
         snapshotPreview.style.display = "block";
 
+        const tesseractDisabled = appConfig.system_dials?.disable_local_tesseract_fallback === true;
         if (navigator.onLine) {
             try {
                 const response = await fetch('/api/extract', {
@@ -650,9 +666,19 @@ async function executeScanWorkflow() {
                 if (!response.ok || !data.text) throw new Error("Cloud pipe broken");
                 activeAiTextRead = data.text;
             } catch (cloudErr) {
+                if (tesseractDisabled) {
+                    alert("Cloud OCR failed and local fallback is disabled. Check your connection and try again.");
+                    setAppState('IDLE');
+                    return;
+                }
                 activeAiTextRead = await runLocalTesseractOCR(dataUrl);
             }
         } else {
+            if (tesseractDisabled) {
+                alert("You are offline and local OCR fallback is disabled. Please reconnect to the network.");
+                setAppState('IDLE');
+                return;
+            }
             activeAiTextRead = await runLocalTesseractOCR(dataUrl);
         }
 
